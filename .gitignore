@@ -168,3 +168,7 @@ data/raw
 data/processed
 data/ml_features
 reports/figures/old
+
+# Models weights
+*clahe.pkl
+models/random_forest
