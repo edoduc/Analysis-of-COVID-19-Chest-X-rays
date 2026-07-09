@@ -172,6 +172,8 @@ reports/figures/old
 # Models weights
 *clahe.pkl
 models/random_forest
+models/inceptionv3
+models/mobilenetv2
 
 # Temp
 ~*
