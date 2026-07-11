@@ -126,7 +126,10 @@ env/
 venv/
 ENV/
 env.bak/
-venv.bak/
+venv.bak/*
+mlruns/
+mlflow.db
+
 
 # Spyder project settings
 .spyderproject
@@ -171,9 +174,7 @@ reports/figures/old
 
 # Models weights
 *clahe.pkl
-models/random_forest
-models/inceptionv3
-models/mobilenetv2
+models/
 
 # Temp
 ~*
