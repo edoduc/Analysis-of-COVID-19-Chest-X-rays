@@ -2,12 +2,13 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
-from ..config import CLASS_NAMES, MODEL_PATH, MODEL_SIZE, TORCH_AVAILABLE
+from streamlit_app.config import CLASS_NAMES, MODEL_PATH, MODEL_SIZE, TORCH_AVAILABLE
 
 
 def _require_torch():
     if not TORCH_AVAILABLE:
-        raise RuntimeError("PyTorch n'est pas installé dans cet environnement.")
+        raise RuntimeError(
+            "PyTorch n'est pas installé dans cet environnement.")
     import torch
     import torch.nn as nn
     from torchvision import models, transforms
@@ -40,19 +41,49 @@ def get_eval_transform():
     )
 
 
+# def predict(image_array: np.ndarray) -> dict[str, object]:
+#     torch, _, _, _ = _require_torch()
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     image = Image.fromarray(np.clip(image_array, 0, 255).astype(np.uint8), mode="L")
+#     input_tensor = get_eval_transform()(image).unsqueeze(0).to(device)
+#     with torch.inference_mode():
+#         probabilities = torch.softmax(load_resnet50()(input_tensor), dim=1)[0]
+#     values = probabilities.detach().cpu().numpy()
+#     index = int(values.argmax())
+#     return {
+#         "class_name": CLASS_NAMES[index],
+#         "class_index": index,
+#         "probabilities": values,
+#         "confidence": float(values[index]),
+#         "input_tensor": input_tensor,
+#     }
+
 def predict(image_array: np.ndarray) -> dict[str, object]:
     torch, _, _, _ = _require_torch()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    image = Image.fromarray(np.clip(image_array, 0, 255).astype(np.uint8), mode="L")
+
+    image = Image.fromarray(
+        np.clip(image_array, 0, 255).astype(np.uint8),
+        mode="L",
+    )
+
     input_tensor = get_eval_transform()(image).unsqueeze(0).to(device)
-    with torch.inference_mode():
-        probabilities = torch.softmax(load_resnet50()(input_tensor), dim=1)[0]
+
+    # Important : charger le modèle EN DEHORS du contexte no_grad/inference_mode
+    model = load_resnet50()
+
+    with torch.no_grad():
+        logits = model(input_tensor)
+        probabilities = torch.softmax(logits, dim=1)[0]
+
     values = probabilities.detach().cpu().numpy()
     index = int(values.argmax())
+
     return {
         "class_name": CLASS_NAMES[index],
         "class_index": index,
         "probabilities": values,
         "confidence": float(values[index]),
-        "input_tensor": input_tensor,
+        # "input_tensor": input_tensor,
     }

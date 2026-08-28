@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from ..config import PREPROCESS_SIZE
+from streamlit_app.config import PREPROCESS_SIZE
 
 
 def image_to_array(image: Image.Image | bytes) -> np.ndarray:

@@ -6,9 +6,9 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-from ..components import section_header
-from ..config import CLASS_NAMES, DEMO_DIR, TORCH_AVAILABLE
-from ..core.preprocessing import run_pipeline
+from streamlit_app.components import section_header
+from streamlit_app.config import CLASS_NAMES, DEMO_DIR, TORCH_AVAILABLE
+from streamlit_app.core.preprocessing import run_pipeline
 
 
 # (label affiché, dossier, classe canonique du modèle)
@@ -96,7 +96,7 @@ def render() -> None:
                 st.warning(
                     "PyTorch n'est pas installé : la prédiction est indisponible.")
             elif st.button("Prédire avec ResNet-50", type="primary", width="stretch"):
-                from ..core.model import predict
+                from streamlit_app.core.model import predict
 
                 with st.spinner("Prédiction en cours…"):
                     st.session_state.demo_prediction = predict(
@@ -126,8 +126,8 @@ def render() -> None:
             st.error(
                 f"Prédiction incorrecte — label attendu : {canonical_class}")
         if st.button("Interpréter avec Grad-CAM", type="primary", width="stretch"):
-            from ..core.gradcam import compute_gradcam
-            from ..core.model import load_resnet50
+            from streamlit_app.core.gradcam import compute_gradcam
+            from streamlit_app.core.model import load_resnet50
 
             with st.spinner("Calcul Grad-CAM en cours…"):
                 st.session_state.demo_cam = compute_gradcam(

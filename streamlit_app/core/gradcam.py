@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image
 
-from ..config import MODEL_SIZE
+from streamlit_app.config import MODEL_SIZE
 
 
 def compute_gradcam(model, image_array: np.ndarray) -> dict[str, np.ndarray]:
