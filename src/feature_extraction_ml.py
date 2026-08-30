@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import json
 from pathlib import Path
 from tqdm import tqdm
 from scipy.stats import skew, kurtosis
@@ -105,7 +106,7 @@ def extract_hog_features(image,
 
 from data_loader import DatasetLoader 
 
-def process_and_save_features(X_images, y_labels, split_name, output_dir):
+def process_and_save_features(X_images, y_labels, split_name, output_dir, lbp_config, hog_config):
     """
     Extracts features independently and saves them as separate .npy files.
     split_name: 'train' or 'test'
@@ -118,8 +119,19 @@ def process_and_save_features(X_images, y_labels, split_name, output_dir):
     for img in tqdm(X_images, desc=f"Processing {split_name} images"):
         # Extract and append
         all_stats.append(extract_stat_features(img))
-        all_lbp.append(extract_lbp_features(img))
-        all_hog.append(extract_hog_features(img))
+        all_lbp.append(extract_lbp_features(
+            img,
+            radius=lbp_config.get("radius", 3),
+            method=lbp_config.get("method", "uniform")
+        ))
+        all_hog.append(extract_hog_features(
+            img,
+            hog_image_size=tuple(hog_config.get("hog_image_size", [160, 160])),
+            orientations=hog_config.get("orientations", 9),
+            pixels_per_cell=tuple(hog_config.get("pixels_per_cell", [32, 32])),
+            cells_per_block=tuple(hog_config.get("cells_per_block", [2, 2])),
+            block_norm=hog_config.get("block_norm", "L2-Hys")
+        ))
         
     # Convert lists to NumPy matrices
     all_stats = np.array(all_stats)
@@ -141,6 +153,18 @@ def main():
     FEATURES_DIR = PROJECT_ROOT / "data" / "features"
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
     
+    # Load config
+    config_path = PROJECT_ROOT / "config.json"
+    if config_path.exists():
+        with open(config_path, "r") as f:
+            config = json.load(f)
+    else:
+        config = {}
+        
+    fe_config = config.get("feature_extraction", {})
+    lbp_config = fe_config.get("lbp", {})
+    hog_config = fe_config.get("hog", {})
+
     # 2. Load the dataset (Memory efficient)
     loader = DatasetLoader(data_dir=DATA_DIR)
     X_train, X_test, y_train, y_test, label_encoder = loader.get_train_test_split()
@@ -149,8 +173,8 @@ def main():
     np.save(FEATURES_DIR / "classes.npy", label_encoder.classes_)
     
     # 4. Extract and Save
-    process_and_save_features(X_train, y_train, split_name="train", output_dir=FEATURES_DIR)
-    process_and_save_features(X_test, y_test, split_name="test", output_dir=FEATURES_DIR)
+    process_and_save_features(X_train, y_train, split_name="train", output_dir=FEATURES_DIR, lbp_config=lbp_config, hog_config=hog_config)
+    process_and_save_features(X_test, y_test, split_name="test", output_dir=FEATURES_DIR, lbp_config=lbp_config, hog_config=hog_config)
     
     print("\nAll feature extraction completed successfully!")
 
