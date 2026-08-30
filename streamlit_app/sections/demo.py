@@ -1,4 +1,5 @@
 import hashlib
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
@@ -42,33 +43,84 @@ def render() -> None:
     section_header(11, "Démonstration ResNet-50",
                    "Sélection, pré-traitement et prédiction")
 
-    columns = st.columns(4)
-    for (display_label, folder, _), column in zip(CLASS_FOLDERS, columns):
-        with column:
-            st.selectbox(
-                display_label,
-                list_class_images(folder),
-                index=None,
-                key=f"sel_{folder}",
-                format_func=lambda path: path.name,
-                placeholder="Choisir…",
-                on_change=_select_one,
-                args=(folder,),
+    # Image source selector
+    source_type = st.radio(
+        "Source de l'image",
+        ["Échantillons de démonstration", "Importer ma propre radiographie"],
+        horizontal=True
+    )
+    
+    # State reset on source type toggle
+    if st.session_state.get("_last_source_type") != source_type:
+        st.session_state._last_source_type = source_type
+        for key in ("demo_steps", "demo_prediction", "demo_cam", "demo_image_key"):
+            st.session_state.pop(key, None)
+
+    image_bytes = None
+    mask_bytes = None
+    raw_image = None
+    canonical_class = "Inconnu"
+
+    if source_type == "Échantillons de démonstration":
+        columns = st.columns(4)
+        for (display_label, folder, _), column in zip(CLASS_FOLDERS, columns):
+            with column:
+                st.selectbox(
+                    display_label,
+                    list_class_images(folder),
+                    index=None,
+                    key=f"sel_{folder}",
+                    format_func=lambda path: path.name,
+                    placeholder="Choisir…",
+                    on_change=_select_one,
+                    args=(folder,),
+                )
+
+        active_folder = st.session_state.get("active_folder")
+        selected = st.session_state.get(f"sel_{active_folder}") if active_folder else None
+        
+        if selected is None:
+            return
+
+        canonical_class = next(cls for _, folder, cls in CLASS_FOLDERS if folder == active_folder)
+        image_bytes = selected.read_bytes()
+        mask_path = selected.with_name(f"{selected.stem}_mask{selected.suffix}")
+        mask_bytes = mask_path.read_bytes() if mask_path.exists() else None
+        raw_image = Image.open(selected).convert("L")
+
+    else:
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            uploaded_img = st.file_uploader(
+                "Radiographie pulmonaire (format PNG/JPG)",
+                type=["png", "jpg", "jpeg"],
+                key="custom_uploaded_image"
             )
+        with col2:
+            uploaded_mask = st.file_uploader(
+                "Masque pulmonaire - Optionnel (format PNG/JPG)",
+                type=["png", "jpg", "jpeg"],
+                key="custom_uploaded_mask"
+            )
+        with col3:
+            custom_expected = st.selectbox(
+                "Label attendu (Optionnel)",
+                ["Inconnu", "COVID", "Normal", "Lung_Opacity", "Viral Pneumonia"],
+                index=0,
+                key="custom_expected_label"
+            )
+            canonical_class = custom_expected
 
-    active_folder = st.session_state.get("active_folder")
-    selected = st.session_state.get(
-        f"sel_{active_folder}") if active_folder else None
-    if selected is None:
-        return
+        if uploaded_img is None:
+            st.info("Veuillez importer une radiographie pulmonaire pour démarrer.")
+            return
 
-    canonical_class = next(
-        cls for _, folder, cls in CLASS_FOLDERS if folder == active_folder)
-    image_bytes = selected.read_bytes()
-    mask_path = selected.with_name(f"{selected.stem}_mask{selected.suffix}")
-    mask_bytes = mask_path.read_bytes() if mask_path.exists() else None
-    raw_image = Image.open(selected).convert("L")
+        image_bytes = uploaded_img.getvalue()
+        if uploaded_mask is not None:
+            mask_bytes = uploaded_mask.getvalue()
+        raw_image = Image.open(BytesIO(image_bytes)).convert("L")
 
+    # Update cache and clear predictions if the selected/uploaded image content changed
     image_key = hashlib.sha256(image_bytes + (mask_bytes or b"")).hexdigest()
     if st.session_state.get("demo_image_key") != image_key:
         for key in ("demo_steps", "demo_prediction", "demo_cam"):
@@ -77,7 +129,8 @@ def render() -> None:
 
     if mask_bytes is None:
         st.warning(
-            "Aucun masque associé : le pipeline sera exécuté sans masquage pulmonaire.")
+            "Aucun masque associé : le pipeline sera exécuté sans masquage pulmonaire."
+        )
 
     _, left, _, right, _ = st.columns([1, 3, 1, 3, 1])
     with left:
@@ -94,7 +147,8 @@ def render() -> None:
             st.image(clahe_image, caption="Image pré-traitée", width="stretch")
             if not TORCH_AVAILABLE:
                 st.warning(
-                    "PyTorch n'est pas installé : la prédiction est indisponible.")
+                    "PyTorch n'est pas installé : la prédiction est indisponible."
+                )
             elif st.button("Prédire avec ResNet-50", type="primary", width="stretch"):
                 from streamlit_app.core.model import predict
 
@@ -106,25 +160,35 @@ def render() -> None:
     prediction = st.session_state.get("demo_prediction")
     if prediction:
         st.subheader("Prédiction")
-        col_expected, col_predicted, col_confidence, col_chart = st.columns([
-                                                                            1, 1, 1, 1])
-        col_expected.metric("Label attendu", canonical_class)
+        show_validation = (canonical_class != "Inconnu")
+        
+        if show_validation:
+            col_expected, col_predicted, col_confidence, col_chart = st.columns([1, 1, 1, 1])
+            col_expected.metric("Label attendu", canonical_class)
+        else:
+            col_predicted, col_confidence, col_chart = st.columns([1, 1, 2])
+            
         col_predicted.metric("Classe prédite", str(prediction["class_name"]))
         col_confidence.metric(
             "Confiance", f"{float(prediction['confidence']):.1%}")
+            
         with col_chart:
             probabilities = pd.DataFrame(
-                {"Probabilité": [float(p)
-                                 for p in prediction["probabilities"]]},
+                {"Probabilité": [float(p) for p in prediction["probabilities"]]},
                 index=CLASS_NAMES,
             )
             st.bar_chart(probabilities)
-        if prediction["class_name"] == canonical_class:
-            st.success(
-                f"Prédiction correcte — label attendu : {canonical_class}")
-        else:
-            st.error(
-                f"Prédiction incorrecte — label attendu : {canonical_class}")
+            
+        if show_validation:
+            if prediction["class_name"] == canonical_class:
+                st.success(
+                    f"Prédiction correcte — label attendu : {canonical_class}"
+                )
+            else:
+                st.error(
+                    f"Prédiction incorrecte — label attendu : {canonical_class}"
+                )
+                
         if st.button("Interpréter avec Grad-CAM", type="primary", width="stretch"):
             from streamlit_app.core.gradcam import compute_gradcam
             from streamlit_app.core.model import load_resnet50
