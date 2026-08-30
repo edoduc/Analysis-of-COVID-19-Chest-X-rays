@@ -70,3 +70,9 @@ La dernière section de l'application permet de tester le modèle sur une radiog
 4. Cliquer sur **Interpréter avec Grad-CAM** : les zones ayant influencé la décision
    sont visualisées.
 
+---
+
+## Guide Développeur / Data Scientist
+
+Pour les développeurs et les data scientists souhaitant reproduire les entraînements de modèles, tester les différentes architectures de Machine Learning ou ajuster les hyperparamètres, veuillez consulter notre [Guide d'entraînement et de reproduction (DEVELOPER.md)](./DEVELOPER.md).
+
