@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 
 from streamlit_app.config import PREPROCESS_SIZE
+from src.preprocessing import crop_black_borders, add_padding, apply_clahe_nonzero
 
 
 def image_to_array(image: Image.Image | bytes) -> np.ndarray:
@@ -31,38 +32,6 @@ def load_mask(mask: Image.Image | bytes) -> np.ndarray:
         interpolation=cv2.INTER_NEAREST,
     )
     return (mask_array > 0).astype(np.float32)
-
-
-def crop_black_borders(image: np.ndarray) -> np.ndarray:
-    coordinates = np.argwhere(image > 0)
-    if coordinates.size == 0:
-        return image
-    top, left = coordinates.min(axis=0)
-    bottom, right = coordinates.max(axis=0) + 1
-    return image[top:bottom, left:right]
-
-
-def add_padding(image: np.ndarray) -> np.ndarray:
-    height, width = image.shape[:2]
-    size = max(height, width)
-    top = (size - height) // 2
-    bottom = size - height - top
-    left = (size - width) // 2
-    right = size - width - left
-    return cv2.copyMakeBorder(
-        image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=0
-    )
-
-
-def apply_clahe_nonzero(image: np.ndarray) -> np.ndarray:
-    image_uint8 = np.clip(image, 0, 255).astype(np.uint8)
-    nonzero = image_uint8 > 0
-    result = np.zeros_like(image_uint8)
-    if np.any(nonzero):
-        pixels = image_uint8[nonzero].reshape(-1, 1)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        result[nonzero] = clahe.apply(pixels).reshape(-1)
-    return result.astype(np.float32)
 
 
 def run_pipeline(image: Image.Image | bytes, mask: Image.Image | bytes | None) -> dict[str, np.ndarray]:
