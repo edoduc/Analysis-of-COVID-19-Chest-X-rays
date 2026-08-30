@@ -9,10 +9,7 @@ import seaborn as sns
 
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-import tensorflow as tf
-
-def evaluate_ml_model(mode_path, features_dir, feature_list):
+def evaluate_ml_model(model_path, features_dir, feature_list):
     """Loads a Scikit-Learn model and evaluates it using concatenated .npy features."""
     print(f"Loading ml model: {model_path.name}")
     model = joblib.load(model_path)
@@ -30,30 +27,78 @@ def evaluate_ml_model(mode_path, features_dir, feature_list):
     return y_test, y_pred, y_prob
 
 def evaluate_deep_model(model_path, data_dir, img_size=(224, 224)):
-    """Loads a Keras model and evaluates it using images from the processed directory."""
-    print(f"Loading Deep Learning model: {model_path.name}")
-    model = tf.keras.models.load_model(model_path)
+    """Loads a PyTorch model and evaluates it using images from the processed directory."""
+    import torch
+    import torch.nn as nn
+    from torchvision import models, transforms
+    from torchvision.datasets import ImageFolder
+    from torch.utils.data import DataLoader, random_split
+
+    print(f"Loading Deep Learning model (PyTorch): {model_path.name}")
     
-    # Re-verify test set directly from the local folder
-    print("Loading local validation/test images via tf.data...")
-    test_ds = tf.keras.utils.image_dataset_from_directory(
-        data_dir,
-        validation_split=0.2,
-        subset="validation",
-        seed=42,
-        image_size=img_size,
-        batch_size=32,
-        color_mode='rgb'
-    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Extract true labels
-    y_test = np.concatenate([y for x, y in test_ds], axis=0)
+    # 1. Instantiate the ResNet50 model
+    model = models.resnet50(weights=None)
+    model.fc = nn.Linear(model.fc.in_features, 4)  # 4 classes
     
-    print("Running inference on CPU (Deep Learning)...")
-    y_prob = model.predict(test_ds)
-    y_pred = np.argmax(y_prob, axis=1)
+    # Load state dict
+    try:
+        state_dict = torch.load(model_path, map_location=device)
+        if "model" in state_dict:
+            state_dict = state_dict["model"]
+        elif "state_dict" in state_dict:
+            state_dict = state_dict["state_dict"]
+        model.load_state_dict(state_dict)
+    except Exception as e:
+        print(f"Warning: Loading with default state dict failed ({e}). Attempting loading with weights_only=False...")
+        state_dict = torch.load(model_path, map_location=device, weights_only=False)
+        if "model" in state_dict:
+            state_dict = state_dict["model"]
+        elif "state_dict" in state_dict:
+            state_dict = state_dict["state_dict"]
+        model.load_state_dict(state_dict)
+
+    model = model.to(device).eval()
+
+    # 2. Setup transforms (exactly like get_eval_transform() in streamlit_app/core/model.py)
+    eval_transform = transforms.Compose([
+        transforms.Resize(img_size),
+        transforms.Grayscale(num_output_channels=3),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    # 3. Load Dataset
+    print(f"Loading local images from: {data_dir}")
+    full_dataset = ImageFolder(root=str(data_dir), transform=eval_transform)
     
-    return y_test, y_pred, y_prob
+    # Replicate the validation split (20% validation subset with seed 42)
+    generator = torch.Generator().manual_seed(42)
+    val_size = int(0.2 * len(full_dataset))
+    train_size = len(full_dataset) - val_size
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size], generator=generator)
+    
+    # Run inference on validation subset
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+    
+    y_true = []
+    y_pred = []
+    y_prob = []
+    
+    print("Running inference on PyTorch model...")
+    with torch.no_grad():
+        for inputs, targets in val_loader:
+            inputs = inputs.to(device)
+            outputs = model(inputs)
+            probs = torch.softmax(outputs, dim=1)
+            preds = torch.argmax(probs, dim=1)
+            
+            y_true.extend(targets.numpy())
+            y_pred.extend(preds.cpu().numpy())
+            y_prob.extend(probs.cpu().numpy())
+            
+    return np.array(y_true), np.array(y_pred), np.array(y_prob)
 
 def plot_confusion_matrix(y_true, y_pred, class_names, save_path):
     """Generates and saves a clean, professional Confusion Matrix heatmap."""
@@ -72,7 +117,7 @@ def plot_confusion_matrix(y_true, y_pred, class_names, save_path):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate and compare local framework models.")
     parser.add_argument("--type", type=str, choices=['ml', 'deep'], required=True, help="Type of model to evaluate")
-    parser.add_argument("--filename", type=str, required=True, help="Filename of the model (e.g., rf_stats_hog.joblib or best_custom_cnn.keras)")
+    parser.add_argument("--filename", type=str, required=True, help="Filename of the model (e.g., rf_stats_hog.joblib or resnet50_best.pth)")
     parser.add_argument("--features", type=str, nargs='*', default=['stats', 'hog'], help="Features used (only for ml models)")
     args = parser.parse_args()
 
@@ -84,9 +129,15 @@ def main():
     REPORTS_DIR = PROJECT_ROOT / "reports"
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Allow loading deep models from different locations (e.g., models/resnet50/ or models/saved_models/)
     model_path = MODELS_DIR / args.filename
     if not model_path.exists():
-        raise FileNotFoundError(f"Model file not found at {model_path}")
+        # Fallback to direct path or models/resnet50
+        model_path = PROJECT_ROOT / "models" / "resnet50" / args.filename
+        if not model_path.exists():
+            model_path = Path(args.filename)
+            if not model_path.exists():
+                raise FileNotFoundError(f"Model file not found at any standard location: {args.filename}")
 
     # Load class names mapping
     if (FEATURES_DIR / "classes.npy").exists():

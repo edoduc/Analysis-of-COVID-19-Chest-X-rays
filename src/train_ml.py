@@ -43,7 +43,7 @@ def get_model(model_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Train ML models on extracted X-Ray features.")
-    parser.add_argument("--model", type=str, choices=['svm', 'rf'], default='rf', help="Model to train")
+    parser.add_argument("--model", type=str, choices=['svm', 'rf', 'xgb'], default='rf', help="Model to train")
     parser.add_argument("--features", type=str, nargs='+', default=['stats', 'hog'], help="List of features to combine (e.g., stats hog lbp)")
     parser.add_argument("--exp_name", type=str, default="XRay_Classical_ML", help="MLflow Experiment Name")
     args = parser.parse_args()

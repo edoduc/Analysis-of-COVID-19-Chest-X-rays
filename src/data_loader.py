@@ -57,7 +57,7 @@ class DatasetLoader:
         """
         print("Loading images into memory...")
         X, y = self.load_dataset()
-        f
+        
         print(f"Total images loaded: {len(X)}")
         
         # Stratify=y ensures the same class proportions in train and test sets
@@ -69,3 +69,39 @@ class DatasetLoader:
         print(f"Testing set size: {len(X_test)}")
         
         return X_train, X_test, y_train, y_test, self.label_encoder
+
+    def split_and_save_dataset(self, output_base_dir, test_size=0.2, random_state=42):
+        """
+        Splits the pre-processed images by copying files into 'train' and 'test' subdirectories.
+        """
+        import shutil
+        output_base_dir = Path(output_base_dir)
+        
+        classes = sorted([d.name for d in self.data_dir.iterdir() if d.is_dir()])
+        print(f"Splitting dataset for classes: {classes}")
+        
+        for cls in classes:
+            class_dir = self.data_dir / cls
+            image_paths = sorted([p for p in class_dir.iterdir() if p.suffix.lower() in ['.png', '.jpg', '.jpeg']])
+            
+            if not image_paths:
+                print(f"Warning: No images found for class {cls}")
+                continue
+                
+            # Perform split on paths (stratified by doing it per class)
+            train_paths, test_paths = train_test_split(
+                image_paths, test_size=test_size, random_state=random_state
+            )
+            
+            # Create destination dirs
+            train_class_dir = output_base_dir / "train" / cls
+            test_class_dir = output_base_dir / "test" / cls
+            train_class_dir.mkdir(parents=True, exist_ok=True)
+            test_class_dir.mkdir(parents=True, exist_ok=True)
+            
+            print(f"Copying {len(train_paths)} train and {len(test_paths)} test images for class '{cls}'...")
+            
+            for p in train_paths:
+                shutil.copy(p, train_class_dir / p.name)
+            for p in test_paths:
+                shutil.copy(p, test_class_dir / p.name)
