@@ -15,43 +15,43 @@ Le fichier `config.json` à la racine est l'unique source de vérité pour :
 
 ## 2. Pipeline de Reproduction (Fast-Forward)
 
-Pour exécuter et reproduire l'entraînement des modèles de machine learning classiques, exécutez les commandes suivantes dans l'ordre (en utilisant `uv` ou `python` selon votre installation) :
+Pour exécuter et reproduire l'entraînement des modèles de machine learning classiques, exécutez les commandes suivantes dans l'ordre:
 
 ### Étape 1 : Prétraitement des images brutes
 Applique le pipeline de masquage, recadrage, ajustement du contraste (CLAHE) et sauvegarde dans `data/processed` :
 ```bash
-uv run python src/preprocessing.py
+python src/preprocessing.py
 ```
 
 ### Étape 2 : Séparation stratifiée du dataset
 Sépare les images traitées en répertoires `train` et `test` (80% / 20% stratifié) :
 ```bash
-uv run python src/create_split_dataset.py
+python src/create_split_dataset.py
 ```
 
 ### Étape 3 : Extraction des caractéristiques ML
 Calcule et enregistre de manière indépendante les matrices de caractéristiques statistiques, LBP et HOG :
 ```bash
-uv run python src/feature_extraction_ml.py
+python src/feature_extraction_ml.py
 ```
 
 ### Étape 4 : Entraînement des modèles
 Entraînez un modèle spécifique sur les caractéristiques de votre choix :
 ```bash
 # Random Forest
-uv run python src/train_ml.py --model rf --features stats hog
+python src/train_ml.py --model rf --features stats hog
 
 # Support Vector Machine (SVM)
-uv run python src/train_ml.py --model svm --features stats lbp hog
+python src/train_ml.py --model svm --features stats lbp hog
 
 # XGBoost
-uv run python src/train_ml.py --model xgb --features stats hog
+python src/train_ml.py --model xgb --features stats hog
 ```
 
 ### Étape 5 : Exécuter l'étude d'ablation globale
 Pour lancer l'entraînement complet de toutes les combinaisons possibles de caractéristiques et de modèles et les enregistrer dans MLflow :
 ```bash
-uv run python src/run_experiments.py
+python src/run_experiments.py
 ```
 
 ---
@@ -62,10 +62,10 @@ Une fois entraînés, évaluez les performances globales des modèles et génér
 
 * **Modèle Machine Learning (ex. Random Forest) :**
   ```bash
-  uv run python src/evaluate.py --type ml --filename rf_stats_hog.joblib --features stats hog
+  python src/evaluate.py --type ml --filename rf_stats_hog.joblib --features stats hog
   ```
 
 * **Modèle Deep Learning (PyTorch ResNet-50) :**
   ```bash
-  uv run python src/evaluate.py --type deep --filename resnet50_best.pth
+  python src/evaluate.py --type deep --filename resnet50_best.pth
   ```
