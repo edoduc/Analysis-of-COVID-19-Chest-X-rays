@@ -123,13 +123,22 @@ def evaluate_deep_model(model_path, data_dir, arch='resnet50', img_size=(224, 22
 
     model = model.to(device).eval()
 
-    # 2. Setup transforms (exactly like get_eval_transform() in streamlit_app/core/model.py)
-    eval_transform = transforms.Compose([
-        transforms.Resize(img_size),
-        transforms.Grayscale(num_output_channels=3),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    # 2. Setup transforms (Adapted based on architecture!)
+    if arch == 'custom_cnn':
+        # Pas de normalisation ImageNet pour le CNN from scratch (Resize + ToTensor uniquement)
+        eval_transform = transforms.Compose([
+            transforms.Resize(img_size),
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor()
+        ])
+    else:
+        # Normalisation ImageNet requise pour ResNet-50
+        eval_transform = transforms.Compose([
+            transforms.Resize(img_size),
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
 
     # 3. Load Dataset
     print(f"Loading local images from: {data_dir}")
