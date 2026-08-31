@@ -69,3 +69,8 @@ Une fois entraînés, évaluez les performances globales des modèles et génér
   ```bash
   python src/evaluate.py --type deep --filename resnet50_best.pth
   ```
+
+* **Modèle Deep Learning Custom CNN (from scratch) :**
+  ```bash
+  uv run python src/evaluate.py --type deep --arch custom_cnn --filename cnn_from_scratch.pt
+  ```
