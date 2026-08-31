@@ -31,7 +31,7 @@ def load_mask(mask: Image.Image | bytes) -> np.ndarray:
         (PREPROCESS_SIZE, PREPROCESS_SIZE),
         interpolation=cv2.INTER_NEAREST,
     )
-    return (mask_array > 0).astype(np.float32)
+    return (mask_array > 100).astype(np.float32)
 
 
 def run_pipeline(image: Image.Image | bytes, mask: Image.Image | bytes | None) -> dict[str, np.ndarray]:
