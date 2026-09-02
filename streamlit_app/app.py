@@ -478,7 +478,7 @@ def main() -> None:
             "  - **Viral Pneumonia :** Détection exceptionnelle (F1 0,96 ; précision 98 %)\n"
             "  - **Normal & COVID :** Très performantes (F1 0,94 et 0,93 ; précision COVID de 96 %)\n"
             "  - **Lung Opacity :** Reste la classe la plus complexe (F1 0,91)\n"
-            "  - **Point d'attention métier :** Rappel COVID de 91 % ($\approx$ 9 % de faux négatifs à surveiller en clinique)"
+            "  - **Point d'attention métier :** Rappel COVID de 91 % ($\\approx$ 9 % de faux négatifs à surveiller en clinique)"
         )
         report_column, matrix_column = st.columns(2)
         with report_column:
