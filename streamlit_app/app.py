@@ -1,8 +1,3 @@
-from streamlit_app.config import CLASS_NAMES
-from streamlit_app.components import metric_row, section_header, show_figure
-from streamlit_app.sections import demo
-import streamlit.components.v1 as components
-import streamlit as st
 import sys
 from pathlib import Path
 
@@ -10,6 +5,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+    
+import streamlit as st
+import streamlit.components.v1 as components
+    
+from streamlit_app.config import CLASS_NAMES
+from streamlit_app.components import metric_row, section_header, show_figure
+from streamlit_app.sections import demo
 
 
 def scroll_to_top_on_change(section: str) -> None:
