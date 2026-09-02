@@ -1,3 +1,8 @@
+from streamlit_app.config import CLASS_NAMES
+from streamlit_app.components import metric_row, section_header, show_figure
+from streamlit_app.sections import demo
+import streamlit.components.v1 as components
+import streamlit as st
 import sys
 from pathlib import Path
 
@@ -6,11 +11,37 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import streamlit as st
 
-from streamlit_app.sections import demo
-from streamlit_app.components import metric_row, section_header, show_figure
-from streamlit_app.config import CLASS_NAMES
+def scroll_to_top_on_change(section: str) -> None:
+    if st.session_state.get("_last_section") != section:
+        st.session_state._last_section = section
+        # Section label embedded so the iframe HTML differs and the script re-runs each change.
+        components.html(
+            f"""
+            <script>
+            const marker = {section!r};
+            const doc = window.parent.document;
+            const selectors = [
+                'section.main',
+                '[data-testid="stMain"]',
+                '[data-testid="stAppViewContainer"]',
+                '.main',
+            ];
+            function scrollTop() {{
+                for (const selector of selectors) {{
+                    const element = doc.querySelector(selector);
+                    if (element) {{ element.scrollTo({{top: 0, behavior: 'instant'}}); }}
+                }}
+                window.parent.scrollTo(0, 0);
+            }}
+            scrollTop();
+            setTimeout(scrollTop, 50);
+            setTimeout(scrollTop, 200);
+            </script>
+            """,
+            height=0,
+        )
+
 
 # Config de la page Streamlit
 st.set_page_config(
@@ -47,10 +78,12 @@ def main() -> None:
     )
     section = sections_dict[selected_section_name]
 
+    scroll_to_top_on_change(section)
+
     st.sidebar.markdown("---")
     st.sidebar.markdown(
         "<div style='font-size: 0.8rem; color: #9ca3af; text-align: center;'>"
-        "Soutenance de Projet — Janvier 2026"
+        "Soutenance de Projet — 3 Septembre 2026"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -154,7 +187,8 @@ def main() -> None:
             "Viral Pneumonia": "3.1-sample_data_viral_pneumonia.png",
         }
         selected_class = st.selectbox("Classe", list(sample_figures.keys()))
-        show_figure(sample_figures[selected_class], caption=f"Échantillon — {selected_class}")
+        show_figure(sample_figures[selected_class],
+                    caption=f"Échantillon — {selected_class}")
 
         st.subheader("Un jeu de données déséquilibré")
         text_column, chart_column = st.columns([3, 2])
@@ -171,7 +205,8 @@ def main() -> None:
                 "- **Métrique clé :** Suivi rigoureux du **F1-score macro** pour une évaluation juste de chaque classe"
             )
         with chart_column:
-            show_figure("3.2-distribution_data_class.png", caption="Distribution des classes")
+            show_figure("3.2-distribution_data_class.png",
+                        caption="Distribution des classes")
 
         st.subheader("Analyses statistiques des zones segmentées")
         st.markdown(
@@ -188,9 +223,11 @@ def main() -> None:
         st.markdown("**Valeurs extrêmes de moyenne d'intensité**")
         dark_column, bright_column = st.columns(2)
         with dark_column:
-            show_figure("3.5-smallest_mean.png", caption="Images les plus sombres")
+            show_figure("3.5-smallest_mean.png",
+                        caption="Images les plus sombres")
         with bright_column:
-            show_figure("3.5-largest_px_mean.png", caption="Images les plus claires")
+            show_figure("3.5-largest_px_mean.png",
+                        caption="Images les plus claires")
         st.markdown(
             "- **Biais d'acquisition :** L'intensité globale traduit le contraste, l'appareil et l'opacité technique de l'image\n"
             "- **Contradiction visuelle :** Des cas normaux apparaissent parmi les plus clairs/sombres et inversement\n"
@@ -263,12 +300,14 @@ def main() -> None:
             st.markdown(
                 "**Local Binary Patterns (LBP)** : descripteurs de texture comparant chaque pixel à ses voisins pour produire un motif binaire, résumé sous forme d'histogramme. La variante uniforme est utilisée pour réduire la dimension tout en conservant les motifs structurés."
             )
-            show_figure("5.1-lbp_features.png", caption="Extraction des caractéristiques LBP")
+            show_figure("5.1-lbp_features.png",
+                        caption="Extraction des caractéristiques LBP")
         with hog_tab:
             st.markdown(
                 "**Histogram of Oriented Gradients (HOG)** : capturent les formes et les contours via la distribution des orientations de gradients par cellule, normalisée localement. Complémentaires des STAT, ils décrivent l'organisation spatiale des structures."
             )
-            show_figure("5.1-hog_features.png", caption="Extraction des caractéristiques HOG")
+            show_figure("5.1-hog_features.png",
+                        caption="Extraction des caractéristiques HOG")
 
         st.subheader("Combinaisons de caractéristiques testées")
         st.markdown(
@@ -320,7 +359,8 @@ def main() -> None:
         )
         results_column, report_column = st.columns(2)
         with results_column:
-            show_figure("5.2.1-svm_features_results.png", caption="Synthèse des résultats SVM")
+            show_figure("5.2.1-svm_features_results.png",
+                        caption="Synthèse des résultats SVM")
         with report_column:
             show_figure(
                 "5.2.1-svm_classification_report.png",
@@ -329,7 +369,7 @@ def main() -> None:
 
         st.subheader("Optimisation")
         st.markdown(
-            "- **Pipeline optimisé :** StandardScaler $\rightarrow$ Réduction de dimension PCA (95 % variance) $\rightarrow$ SVM (SVC)\n"
+            "- **Pipeline optimisé :** StandardScaler $\\rightarrow$ Réduction de dimension PCA (95 % variance) $\\rightarrow$ SVM (SVC)\n"
             "- **Méthode :** Recherche d'hyperparamètres C et gamma via `RandomizedSearchCV` (5-fold cross-validation)\n"
             "- **Bénéfices PCA :** Réduction de la redondance des 617 variables et diminution massive du temps de calcul\n"
             "- **Résultat :** Hausse du **F1-score macro à 84,0 %** (gain de +1,2 point)\n"
@@ -393,7 +433,8 @@ def main() -> None:
         )
         results_column, report_column = st.columns(2)
         with results_column:
-            show_figure("6.1.1-xgb_features_results.png", caption="Synthèse des résultats XGBoost")
+            show_figure("6.1.1-xgb_features_results.png",
+                        caption="Synthèse des résultats XGBoost")
         with report_column:
             show_figure(
                 "6.1.1-xgb_classification_report.png",
@@ -442,7 +483,8 @@ def main() -> None:
             "  - Remplacement de la tête de classification par une couche linéaire à **4 classes**\n"
             "  - Fine-tuning complet de tous les paramètres sur nos radiographies segmentées + CLAHE"
         )
-        show_figure("7.1.2-resnet_architecture.png", caption="Architecture ResNet et connexions résiduelles")
+        show_figure("7.1.2-resnet_architecture.png",
+                    caption="Architecture ResNet et connexions résiduelles")
 
         st.subheader("Implémentation et entraînement")
         impl_column, params_column = st.columns(2)
@@ -457,13 +499,16 @@ def main() -> None:
                 "- **Early Stopping** (patience 5), meilleur modèle conservé"
             )
         with params_column:
-            show_figure("7.1.2-resnet_parametres.png", caption="Paramètres d'entraînement")
+            show_figure("7.1.2-resnet_parametres.png",
+                        caption="Paramètres d'entraînement")
 
         curve_loss_column, curve_f1_column = st.columns(2)
         with curve_loss_column:
-            show_figure("7.1.2-resnet_loss_learning_curve.png", caption="Courbe de perte")
+            show_figure("7.1.2-resnet_loss_learning_curve.png",
+                        caption="Courbe de perte")
         with curve_f1_column:
-            show_figure("7.1.2-resnet_f1macro_learning_curve.png", caption="Courbe de F1 macro")
+            show_figure("7.1.2-resnet_f1macro_learning_curve.png",
+                        caption="Courbe de F1 macro")
         st.markdown(
             "L'Early Stopping interrompt l'entraînement après **23 époques**. Le F1 de validation "
             "plafonne autour de 94–95 % tandis que celui d'entraînement approche 99 % : un "
@@ -482,9 +527,11 @@ def main() -> None:
         )
         report_column, matrix_column = st.columns(2)
         with report_column:
-            show_figure("7.2.1-resnet50_classification_report.png", caption="Rapport de classification ResNet-50")
+            show_figure("7.2.1-resnet50_classification_report.png",
+                        caption="Rapport de classification ResNet-50")
         with matrix_column:
-            show_figure("7.2.1-resnet50_confusion_matrix.png", caption="Matrice de confusion ResNet-50")
+            show_figure("7.2.1-resnet50_confusion_matrix.png",
+                        caption="Matrice de confusion ResNet-50")
     elif section.startswith("8."):
         section_header(
             8,
@@ -498,7 +545,8 @@ def main() -> None:
             "  - **Global Average Pooling (GAP) :** Réduction massive du nombre de paramètres pour limiter le surapprentissage\n"
             "  - **Tête Fully Connected :** Deux couches denses avec des taux de **Dropout** régulés (0,4 et 0,3)"
         )
-        show_figure("7.1.3-cnn_fscratch_architecture.png", caption="Architecture du Custom CNN inspiré de VGG")
+        show_figure("7.1.3-cnn_fscratch_architecture.png",
+                    caption="Architecture du Custom CNN inspiré de VGG")
 
         st.subheader("Implémentation et entraînement")
         st.markdown(
@@ -510,7 +558,8 @@ def main() -> None:
             "- **ReduceLROnPlateau** (patience 5) et **Early Stopping** (patience 10)\n"
             "- **Gradient clipping** (norme max 1,0), déterminant pour stabiliser l'entraînement"
         )
-        show_figure("7.1.3-cnn_fscratch_learning_curves.png", caption="Courbes d'apprentissage — perte et F1 macro")
+        show_figure("7.1.3-cnn_fscratch_learning_curves.png",
+                    caption="Courbes d'apprentissage — perte et F1 macro")
         st.markdown(
             "Après des oscillations initiales, la réduction du taux d'apprentissage stabilise "
             "l'entraînement vers l'époque 10 ; l'Early Stopping arrête à **28 époques**."
@@ -528,9 +577,11 @@ def main() -> None:
         )
         cnn_report_column, cnn_matrix_column = st.columns(2)
         with cnn_report_column:
-            show_figure("7.2.2-cnn_fscratch_classification_report.png", caption="Rapport de classification Custom CNN")
+            show_figure("7.2.2-cnn_fscratch_classification_report.png",
+                        caption="Rapport de classification Custom CNN")
         with cnn_matrix_column:
-            show_figure("7.2.2-cnn_fscratch_confusion_matrix.png", caption="Matrice de confusion Custom CNN")
+            show_figure("7.2.2-cnn_fscratch_confusion_matrix.png",
+                        caption="Matrice de confusion Custom CNN")
 
         st.subheader("Conclusion — Deep Learning")
         st.markdown(
@@ -554,7 +605,8 @@ def main() -> None:
         )
 
         st.subheader("Exemple 1 — Prédiction correcte")
-        show_figure("7.3-resnet50_gradcam_1.png", caption="Grad-CAM ResNet-50 — prédiction correcte")
+        show_figure("7.3-resnet50_gradcam_1.png",
+                    caption="Grad-CAM ResNet-50 — prédiction correcte")
         st.markdown(
             "L'évolution est conforme au comportement attendu : conv_block_1 active largement la "
             "région pulmonaire et ses contours, les blocs intermédiaires localisent des motifs, "
@@ -562,8 +614,10 @@ def main() -> None:
         )
 
         st.subheader("Exemple 2 — Erreur avec forte confiance")
-        st.markdown("Radiographie **COVID** classée à tort **Normal** avec une probabilité de 99,99 %.")
-        show_figure("7.3-resnet50_gradcam_3.png", caption="Grad-CAM ResNet-50 — erreur à forte confiance")
+        st.markdown(
+            "Radiographie **COVID** classée à tort **Normal** avec une probabilité de 99,99 %.")
+        show_figure("7.3-resnet50_gradcam_3.png",
+                    caption="Grad-CAM ResNet-50 — erreur à forte confiance")
         st.markdown(
             "Le modèle se concentre pourtant sur des régions **anatomiquement cohérentes** "
             "(poumon gauche au dernier bloc). L'erreur ne vient donc pas d'une mauvaise "
@@ -572,8 +626,10 @@ def main() -> None:
         )
 
         st.subheader("Exemple 3 — Erreur avec faible confiance")
-        st.markdown("Radiographie **Normal** classée **Lung Opacity** avec une probabilité de 39,39 %.")
-        show_figure("7.3-resnet50_gradcam_2.png", caption="Grad-CAM ResNet-50 — erreur à faible confiance")
+        st.markdown(
+            "Radiographie **Normal** classée **Lung Opacity** avec une probabilité de 39,39 %.")
+        show_figure("7.3-resnet50_gradcam_2.png",
+                    caption="Grad-CAM ResNet-50 — erreur à faible confiance")
         st.markdown(
             "Les activations se concentrent progressivement sur une région du poumon droit, à la "
             "texture légèrement plus dense. La **faible probabilité** traduit une hésitation du "
@@ -602,7 +658,8 @@ def main() -> None:
             "- **Évaluation unifiée :** Tous les modèles ont été comparés sur le **même jeu de test figé** pour une rigueur scientifique totale\n"
             "- **Double priorité :** Optimiser le **F1-score macro** pour contrer le déséquilibre, tout en surveillant le **Rappel COVID** (réduire les faux négatifs cliniques)"
         )
-        show_figure("8-synthesis_results.png", caption="Tableau récapitulatif des résultats par modèle")
+        show_figure("8-synthesis_results.png",
+                    caption="Tableau récapitulatif des résultats par modèle")
 
         st.subheader("Résultats")
         st.markdown(
