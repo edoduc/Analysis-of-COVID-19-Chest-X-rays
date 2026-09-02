@@ -1,82 +1,63 @@
 import sys
 from pathlib import Path
 
-import streamlit as st
-import streamlit.components.v1 as components
-
 # Streamlit runs this file directly, so the repository root may not be importable.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from streamlit_app.components import metric_row, section_header, show_figure
+import streamlit as st
+
 from streamlit_app.sections import demo
+from streamlit_app.components import metric_row, section_header, show_figure
+from streamlit_app.config import CLASS_NAMES
 
-
-st.set_page_config(page_title="Analyse de radiographies COVID-19", page_icon="🫁", layout="wide")
-
-
-def scroll_to_top_on_change(section: str) -> None:
-    if st.session_state.get("_last_section") != section:
-        st.session_state._last_section = section
-        # Section label embedded so the iframe HTML differs and the script re-runs each change.
-        components.html(
-            f"""
-            <script>
-            const marker = {section!r};
-            const doc = window.parent.document;
-            const selectors = [
-                'section.main',
-                '[data-testid="stMain"]',
-                '[data-testid="stAppViewContainer"]',
-                '.main',
-            ];
-            function scrollTop() {{
-                for (const selector of selectors) {{
-                    const element = doc.querySelector(selector);
-                    if (element) {{ element.scrollTo({{top: 0, behavior: 'instant'}}); }}
-                }}
-                window.parent.scrollTo(0, 0);
-            }}
-            scrollTop();
-            setTimeout(scrollTop, 50);
-            setTimeout(scrollTop, 200);
-            </script>
-            """,
-            height=0,
-        )
-
-
-def render_static_section(number: int, title: str, subtitle: str, figures: list[str]) -> None:
-    section_header(number, title, subtitle)
-    for figure in figures:
-        show_figure(figure)
+# Config de la page Streamlit
+st.set_page_config(
+    page_title="Analyse de radiographies Covid-19",
+    page_icon="🏥",
+    layout="wide",
+)
 
 
 def main() -> None:
-    st.sidebar.title("Soutenance")
-    section = st.sidebar.radio(
-        "Navigation",
-        [
-            "Page de garde",
-            "1. Introduction",
-            "2. Exploration et analyse des données",
-            "3. Pré-traitement des données",
-            "4. Extraction des caractéristiques",
-            "5. Approche baseline",
-            "6. Approche ensemble",
-            "7. Approche CNN – ResNet-50",
-            "8. Custom CNN from scratch",
-            "9. Interprétabilité",
-            "10. Conclusion et résultats finaux",
-            "11. Démonstration ResNet-50",
-        ],
+    # Sidebar de navigation sous forme de "slides"
+    st.sidebar.title("Navigation")
+    st.sidebar.markdown("---")
+
+    sections_dict = {
+        "1. Présentation du projet": "1.",
+        "2. Contexte et Objectifs": "1.1",
+        "3. Exploration des données": "2.",
+        "4. Pré-traitement": "3.",
+        "5. Extraction de caractéristiques": "4.",
+        "6. Approche Baseline (SVM)": "5.",
+        "7. Approche Ensemble (XGBoost)": "6.",
+        "8. Approche CNN - ResNet-50": "7.",
+        "9. Custom CNN from scratch": "8.",
+        "10. Interprétabilité (Grad-CAM)": "9.",
+        "11. Conclusion générale": "10.",
+        "12. Démonstration interactive": "11.",
+    }
+
+    selected_section_name = st.sidebar.radio(
+        "Diapositives",
+        list(sections_dict.keys()),
+        index=0,
+    )
+    section = sections_dict[selected_section_name]
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        "<div style='font-size: 0.8rem; color: #9ca3af; text-align: center;'>"
+        "Soutenance de Projet — Janvier 2026"
+        "</div>",
+        unsafe_allow_html=True,
     )
 
-    scroll_to_top_on_change(section)
-
-    if section == "Page de garde":
-        _, center_column, _ = st.columns([1, 4, 1])
+    # Rendu des sections (slides)
+    if section.startswith("1.") and not section.startswith("1.1"):
+        _, center_column, _ = st.columns([1, 3, 1])
         with center_column:
             _, logo_column, _ = st.columns([2, 1, 2])
             with logo_column:
@@ -105,7 +86,7 @@ def main() -> None:
                 "</div>",
                 unsafe_allow_html=True,
             )
-    elif section.startswith("1."):
+    elif section.startswith("1.1"):
         section_header(
             1,
             "Introduction",
@@ -113,24 +94,17 @@ def main() -> None:
         )
         st.subheader("Contexte")
         st.markdown(
-            "La pandémie de Covid-19 a souligné le besoin d'outils de diagnostic "
-            "rapides, fiables et accessibles. La PCR reste la méthode de référence, "
-            "mais sa disponibilité, son coût ou son délai d'analyse peuvent limiter "
-            "son utilisation dans certains contextes. Les radiographies pulmonaires "
-            "constituent une source d'information complémentaire pour détecter les "
-            "atteintes respiratoires."
-        )
-        st.markdown(
-            "Dans ce contexte, la computer vision et le deep learning permettent "
-            "d'extraire automatiquement des caractéristiques complexes afin de "
-            "distinguer les cas Covid-19, les cas sains et les autres pneumonies."
+            "- **Besoin critique :** Outils de diagnostic rapides, fiables et accessibles durant la pandémie\n"
+            "- **Limites de la PCR :** Disponibilité variable, coûts élevés et délais d'analyse parfois longs\n"
+            "- **Radiographies 2D :** Alternative complémentaire, rapide et largement disponible dans les hôpitaux\n"
+            "- **Rôle de l'IA :** Computer vision et Deep Learning pour extraire des caractéristiques complexes (COVID, sains, autres pneumonies)"
         )
 
         scope_column, objective_column = st.columns(2)
         with scope_column:
             st.subheader("Périmètre")
             st.markdown(
-                "- Dataset public COVID-19 Radiography Database\n"
+                "- Dataset public **COVID-19 Radiography Database**\n"
                 "- Radiographies pulmonaires 2D en niveaux de gris\n"
                 "- Quatre classes : Normal, COVID, Lung Opacity et Viral Pneumonia\n"
                 "- Masques pulmonaires pour isoler la région d'intérêt\n"
@@ -139,32 +113,20 @@ def main() -> None:
         with objective_column:
             st.subheader("Objectif")
             st.markdown(
-                "Développer un système capable de classifier automatiquement les "
-                "radiographies pulmonaires et comparer plusieurs approches afin "
-                "d'identifier les architectures les plus performantes."
-            )
-            st.markdown(
-                "L'étude évalue aussi l'impact de la segmentation sur la robustesse "
-                "et la précision, puis utilise Grad-CAM pour visualiser les régions "
-                "ayant influencé la décision du modèle."
+                "- **Classification automatique :** Détecter 4 pathologies à partir de radiographies pulmonaires 2D\n"
+                "- **Analyse comparative :** Évaluer et comparer le Machine Learning classique et le Deep Learning\n"
+                "- **Impact de la segmentation :** Étudier l'influence du masquage pulmonaire sur les performances\n"
+                "- **Explicabilité (Grad-CAM) :** Visualiser les régions pulmonaires décisionnelles pour les cliniciens"
             )
 
         st.subheader("Déroulé de la soutenance")
         st.markdown(
-            "- **Exploration et analyse des données** : structure du dataset, classes, "
-            "dimensions et premières observations\n"
-            "- **Pré-traitement** : segmentation pulmonaire, homogénéisation et amélioration "
-            "du contraste\n"
-            "- **Machine Learning** : baseline avec SVM et KNN, puis XGBoost\n"
-            "- **Deep learning** : comparaison entre un Custom CNN et ResNet-50\n"
-            "- **Interprétabilité et bilan** : Grad-CAM, comparaison finale des résultats et "
-            "démonstration interactive avec ResNet-50"
+            "- **Exploration et analyse des données** : structure du dataset, classes, dimensions et premières observations\n"
+            "- **Pré-traitement** : segmentation pulmonaire, homogénéisation et amélioration du contraste (CLAHE)\n"
+            "- **Machine Learning** : baselines avec SVM et KNN, puis classification avancée avec XGBoost\n"
+            "- **Deep learning** : comparaison entre un Custom CNN (from scratch) et ResNet-50 (transfer learning)\n"
+            "- **Interprétabilité et bilan** : Grad-CAM, comparaison finale des résultats et démonstration interactive"
         )
-
-        # st.caption(
-        #     "Le projet évalue le potentiel de l'IA comme outil d'aide au diagnostic ; "
-        #     "il ne remplace pas l'expertise médicale."
-        # )
     elif section.startswith("2."):
         section_header(
             2,
@@ -175,13 +137,11 @@ def main() -> None:
             [
                 ("Radiographies", "21 165"),
                 ("Classes", "4"),
-                # ("Masques", "1 par image"),
             ]
         )
         st.markdown(
-            "Le jeu de données regroupe quatre pathologies pulmonaires. Chaque radiographie "
-            "est en niveaux de gris et dispose d'un masque de segmentation associé, qui isole "
-            "la région des poumons."
+            "- **Multi-classes (4 pathologies) :** Classification de pneumonies virales, COVID, opacités et cas sains\n"
+            "- **Structure :** Radiographies 2D en niveaux de gris + Masques de segmentation pulmonaire associés"
         )
 
         st.subheader("Aperçu des données")
@@ -201,35 +161,29 @@ def main() -> None:
         text_column, chart_column = st.columns([3, 2])
         with text_column:
             st.markdown(
-                "- Normal : 10 192 images\n"
-                "- Lung Opacity : 6 012 images\n"
-                "- COVID : 3 616 images\n"
-                "- Viral Pneumonia : 1 345 images"
+                "- **Normal :** 10 192 images\n"
+                "- **Lung Opacity :** 6 012 images\n"
+                "- **COVID :** 3 616 images\n"
+                "- **Viral Pneumonia :** 1 345 images"
             )
             st.markdown(
-                "Ce déséquilibre pousse les modèles à privilégier les classes majoritaires. "
-                "Il impose des stratégies adaptées (augmentation, poids de classes) et le suivi "
-                "du **F1-score macro** pour évaluer équitablement toutes les catégories."
+                "- **Risque majeur :** Biais des modèles en faveur des classes majoritaires (Normal/Opacités)\n"
+                "- **Solutions :** Stratégies d'augmentation de données, pondération des classes et arrêt anticipé\n"
+                "- **Métrique clé :** Suivi rigoureux du **F1-score macro** pour une évaluation juste de chaque classe"
             )
         with chart_column:
             show_figure("3.2-distribution_data_class.png", caption="Distribution des classes")
 
         st.subheader("Analyses statistiques des zones segmentées")
         st.markdown(
-            "Plusieurs analyses ont été menées sur les régions pulmonaires segmentées : "
-            "quantité de pixels, moyenne et écart-type des intensités, ratio de pixels noirs. "
-            "Exemple ci-dessous avec la **moyenne d'intensité des pixels** par image segmentée."
+            "- **Analyses statistiques menées :** Quantité de pixels, moyenne/écart-type des intensités, ratio de pixels noirs\n"
+            "- **Observations :** Intensités moyennes plus faibles pour les cas sains, plus élevées pour les pathologies\n"
+            "- **Limites majeures :** Fort chevauchement des distributions statistiques globales entre les classes\n"
+            "- **Verdict :** Impossible de classifier par de simples seuils statistiques $\rightarrow$ recours obligatoire au Machine/Deep Learning"
         )
         show_figure(
             "3.4-distribution_pixel_mean.png",
             caption="Distributions et boxplots des moyennes d'intensité par image segmentée",
-        )
-        st.markdown(
-            "La classe Normal tend vers des intensités plus faibles et les classes pathologiques "
-            "vers des valeurs plus élevées, mais les distributions se **chevauchent fortement**. "
-            "Aucune statistique globale ne suffit, à elle seule, à distinguer clairement les "
-            "pathologies : cela justifie le recours à des modèles capables d'apprendre des "
-            "caractéristiques plus complexes."
         )
 
         st.markdown("**Valeurs extrêmes de moyenne d'intensité**")
@@ -239,9 +193,9 @@ def main() -> None:
         with bright_column:
             show_figure("3.5-largest_px_mean.png", caption="Images les plus claires")
         st.markdown(
-            "Les cas extrêmes confirment que l'intensité reflète surtout des différences "
-            "d'opacité, de contraste et de conditions d'acquisition, et non directement la "
-            "pathologie : des images Normal apparaissent parmi les plus claires et inversement."
+            "- **Biais d'acquisition :** L'intensité globale traduit le contraste, l'appareil et l'opacité technique de l'image\n"
+            "- **Contradiction visuelle :** Des cas normaux apparaissent parmi les plus clairs/sombres et inversement\n"
+            "- **Bilan :** Nécessité d'homogénéiser les contrastes (CLAHE) pour masquer ces variations techniques parasites"
         )
     elif section.startswith("3."):
         section_header(
@@ -250,20 +204,16 @@ def main() -> None:
             "Homogénéiser les images et concentrer l'apprentissage sur les poumons",
         )
         st.markdown(
-            "Le pré-traitement homogénéise les radiographies et réduit les variations liées "
-            "aux conditions d'acquisition. La chaîne est appliquée hors ligne, puis les images "
-            "sont sauvegardées pour la modélisation."
+            "- **Objectif :** Réduire le bruit technique, homogénéiser les intensités et supprimer les artefacts d'acquisition\n"
+            "- **Mode :** Pipeline appliqué hors ligne (offline) avec stockage des images traitées dans `data/processed`"
         )
 
         st.subheader("Les étapes du pipeline")
         st.markdown(
-            "1. **Image** : conversion en niveaux de gris, redimensionnement en 299 × 299 et "
-            "passage en float32\n"
-            "2. **Masque** : conversion en niveaux de gris, redimensionnement en 299 × 299 "
-            "(interpolation adaptée) puis binarisation\n"
+            "1. **Image** : conversion en niveaux de gris, redimensionnement en 299 × 299 et passage en float32\n"
+            "2. **Masque** : binarisation après redimensionnement en 299 × 299 (interpolation adaptée)\n"
             "3. **Masquage** : application du masque pour isoler la région pulmonaire\n"
-            "4. **Recadrage** : suppression du padding autour des poumons, en conservant les "
-            "proportions pour ne pas distordre l'information\n"
+            "4. **Recadrage** : suppression du padding autour des poumons (maintien du ratio d'aspect)\n"
             "5. **Mise au carré** : re-redimensionnement en 299 × 299\n"
             "6. **CLAHE** : amélioration locale du contraste, en limitant l'amplification du bruit"
         )
@@ -276,21 +226,16 @@ def main() -> None:
         with choice_column:
             st.subheader("Choix et limites")
             st.markdown(
-                "- **Masquage** : hypothèse que l'information utile est surtout dans les poumons ; "
-                "réduit les corrélations parasites (fond, annotations, artefacts)\n"
-                "- **Limite** : cette hypothèse n'a pas été validée par une étude d'ablation "
-                "(comparaison image complète vs image masquée à conditions égales)\n"
-                "- **CLAHE** : adapté aux radiographies où certaines anomalies ont de faibles "
-                "variations d'intensité"
+                "- **Masquage** : focalise les modèles sur les poumons et élimine les corrélations parasites (fond, annotations)\n"
+                "- **Limite** : l'hypothèse n'a pas été validée par une étude d'ablation comparant l'image brute vs segmentée à conditions égales\n"
+                "- **CLAHE** : indispensable pour faire ressortir les opacités et infiltrats discrets"
             )
         with online_column:
             st.subheader("Normalisation et augmentation online")
             st.markdown(
-                "La normalisation des intensités et la data augmentation ne sont **pas "
-                "appliquées hors ligne**, mais dynamiquement à l'entraînement, à chaque époque : "
-                "rotations légères, translations, variations de luminosité et de contraste. "
-                "Cela augmente la diversité des données sans créer d'images sur disque et "
-                "réduit le risque de surapprentissage."
+                "- **Data Augmentation (Train uniquement) :** Appliquée dynamiquement en mémoire (rotations, translations, contraste)\n"
+                "- **Pas d'écriture disque :** Évite de surcharger le stockage local et d'induire du surapprentissage\n"
+                "- **Bénéfice :** Renforce massivement la robustesse et la généralisation du modèle profond"
             )
     elif section.startswith("4."):
         section_header(
@@ -299,52 +244,37 @@ def main() -> None:
             "Représenter chaque image par un vecteur numérique pour le machine learning classique",
         )
         st.markdown(
-            "Les algorithmes de machine learning classiques n'exploitent pas directement les "
-            "images. Chaque radiographie est donc décrite par un vecteur de caractéristiques, "
-            "extraites **uniquement à partir des pixels non nuls** des images segmentées pour "
-            "éviter l'influence du fond."
+            "- **Contrainte ML classique :** Les modèles classiques requièrent des vecteurs de caractéristiques structurés\n"
+            "- **Isolation du signal :** Extraction de caractéristiques **uniquement sur les pixels non nuls** (région des poumons)\n"
+            "- **Bénéfice :** Élimine complètement les corrélations parasites et l'influence du fond de l'image"
         )
 
         stat_tab, lbp_tab, hog_tab = st.tabs(["STAT", "LBP", "HOG"])
         with stat_tab:
             st.markdown(
-                "**Caractéristiques statistiques** : décrivent la distribution des niveaux de "
-                "gris de la région pulmonaire segmentée."
+                "**Caractéristiques statistiques (15 dimensions)** : décrivent la distribution des niveaux de gris pulmonaires."
             )
             st.markdown(
-                "- **Mean** : intensité moyenne des pixels\n"
-                "- **Std** : dispersion des intensités (hétérogénéité)\n"
-                "- **Min / Max** : valeurs extrêmes des niveaux de gris\n"
-                "- **Median** : valeur centrale, robuste aux valeurs aberrantes\n"
-                "- **Percentiles (P5, P25, P75, P95)** : répartition des intensités\n"
-                "- **Skewness** : asymétrie de la distribution\n"
-                "- **Kurtosis** : aplatissement ou concentration de la distribution\n"
-                "- **Entropy** : complexité des intensités\n"
-                "- **Variance du Laplacien** : richesse en contours et netteté\n"
-                "- **Gradient magnitude mean / std** : moyenne et dispersion des gradients"
+                "- **Tendance centrale :** Mean, Median, Min, Max\n"
+                "- **Dispersion et forme :** Std, Skewness (asymétrie), Kurtosis (concentration)\n"
+                "- **Répartition fine :** Percentiles (P5, P25, P75, P95)\n"
+                "- **Texture et contours :** Shannon Entropy, variance du Laplacien (netteté), statistiques du gradient"
             )
         with lbp_tab:
             st.markdown(
-                "**Local Binary Patterns** : descripteurs de texture comparant chaque pixel à "
-                "ses voisins pour produire un motif binaire, résumé sous forme d'histogramme. "
-                "La variante uniforme est utilisée pour réduire la dimension tout en conservant "
-                "les motifs les plus représentatifs."
+                "**Local Binary Patterns (LBP)** : descripteurs de texture comparant chaque pixel à ses voisins pour produire un motif binaire, résumé sous forme d'histogramme. La variante uniforme est utilisée pour réduire la dimension tout en conservant les motifs structurés."
             )
             show_figure("5.1-lbp_features.png", caption="Extraction des caractéristiques LBP")
         with hog_tab:
             st.markdown(
-                "**Histogram of Oriented Gradients** : capturent les formes et les contours via "
-                "la distribution des orientations de gradients par cellule, normalisée "
-                "localement. Complémentaires des STAT, ils décrivent l'organisation spatiale "
-                "des structures."
+                "**Histogram of Oriented Gradients (HOG)** : capturent les formes et les contours via la distribution des orientations de gradients par cellule, normalisée localement. Complémentaires des STAT, ils décrivent l'organisation spatiale des structures."
             )
             show_figure("5.1-hog_features.png", caption="Extraction des caractéristiques HOG")
 
         st.subheader("Combinaisons de caractéristiques testées")
         st.markdown(
-            "Les trois familles sont complémentaires : distribution globale (STAT), textures "
-            "locales (LBP) et formes (HOG). Les modèles sont entraînés sur chaque jeu et sur "
-            "leurs combinaisons pour identifier la représentation la plus discriminante."
+            "- **Complémentarité :** STAT (distribution globale des tons), LBP (textures locales), et HOG (contours et formes géométriques)\n"
+            "- **Méthodologie :** Entraînement et validation croisée sur chaque famille de descripteurs et leurs combinaisons"
         )
         _, table_column, _ = st.columns([1, 2, 1])
         with table_column:
@@ -359,38 +289,35 @@ def main() -> None:
             "SVM comme modèle de référence sur les caractéristiques extraites",
         )
         st.markdown(
-            "L'étude baseline se concentre sur le **Support Vector Machine (SVM)**, qui "
-            "construit une frontière de décision maximisant la marge entre les classes. Il est "
-            "bien adapté aux jeux de caractéristiques de dimension élevée comme ceux incluant "
-            "HOG. Le paramètre `class_weight=\"balanced\"` compense le déséquilibre des classes."
+            "- **Algorithme de référence :** Support Vector Machine (SVM) maximisant la marge entre les frontières de décision\n"
+            "- **Haute dimension :** Particulièrement performant sur de grands vecteurs de caractéristiques (ex. STAT + LBP + HOG)\n"
+            "- **Gestion du déséquilibre :** Utilisation du paramètre `class_weight=\"balanced\"` pour équilibrer l'importance des classes"
         )
 
         impl_column, metric_column = st.columns(2)
         with impl_column:
             st.subheader("Implémentation et standardisation")
             st.markdown(
-                "Pipeline scikit-learn : **StandardScaler** puis **SVC**. La standardisation "
-                "est indispensable car le SVM est sensible à l'échelle des variables — sans "
-                "elle, une variable de grande amplitude dominerait la frontière de décision. "
-                "Le modèle est entraîné sur chaque jeu de caractéristiques et leurs combinaisons."
+                "- **Standardisation requise :** Le SVM est sensible à l'échelle des variables ; utilisation de `StandardScaler` indispensable\n"
+                "- **Mode d'évaluation :** Entraînement séparé sur chaque famille de caractéristiques et combinaisons complexes"
             )
         with metric_column:
             st.subheader("Métriques observées")
             st.markdown(
                 "- **F1-score macro** : métrique principale, adaptée au multiclasse déséquilibré\n"
-                "- **Rappel COVID** : proportion de cas COVID détectés (un faux négatif est "
-                "critique)\n"
-                "- **Précision COVID** : pour vérifier qu'un rappel élevé ne s'accompagne pas "
-                "de trop de faux positifs"
+                "- **Rappel COVID** : proportion de cas COVID détectés (un faux négatif est critique)\n"
+                "- **Précision COVID** : pour vérifier qu'un rappel élevé ne s'accompagne pas de trop de faux positifs"
             )
 
         st.subheader("Résultats baseline")
         st.markdown(
-            "Utilisées seules, les caractéristiques HOG sont les plus discriminantes "
-            "(F1 macro 76,7 %) devant STAT (68,0 %) et LBP (67,0 %). Les combinaisons "
-            "améliorent systématiquement les performances : la meilleure est "
-            "**STAT + LBP + HOG** avec un **F1 macro de 82,8 %**, confirmant la "
-            "complémentarité des trois familles."
+            "- **Performances individuelles :** HOG (76,7 % F1 macro) > STAT (68,0 %) > LBP (67,0 %)\n"
+            "- **Synergie des descripteurs :** Les combinaisons améliorent systématiquement les scores\n"
+            "- **Champion Baseline :** **STAT + LBP + HOG** obtient un **F1-score macro de 82,8 %**\n"
+            "- **Hétérogénéité des classes :**\n"
+            "  - **Viral Pneumonia :** Très bien détectée (F1 0,90 ; rappel 94 %) malgré un petit effectif\n"
+            "  - **Normal & Lung Opacity :** Correctement distinguées (F1 0,87 & 0,82)\n"
+            "  - **COVID :** La plus complexe (F1 0,73 ; précision 70 % ; rappel 75 %)"
         )
         results_column, report_column = st.columns(2)
         with results_column:
@@ -400,24 +327,14 @@ def main() -> None:
                 "5.2.1-svm_classification_report.png",
                 caption="Rapport de classification SVM",
             )
-        st.markdown(
-            "Le rapport de classification confirme des performances hétérogènes : COVID reste "
-            "la plus difficile (F1 0,73 ; précision 70 % ; rappel 75 %), tandis que Viral "
-            "Pneumonia est très bien reconnue (F1 0,90 ; rappel 94 %) malgré son faible "
-            "effectif. Normal (F1 0,87) et Lung Opacity (F1 0,82) sont correctement classées."
-        )
 
         st.subheader("Optimisation")
         st.markdown(
-            "Sur la configuration STAT + LBP + HOG : pipeline **StandardScaler → PCA (95 % de "
-            "variance) → SVC**, avec optimisation de **C** et **gamma** via "
-            "**RandomizedSearchCV** en validation croisée stratifiée à 5 folds. La PCA réduit "
-            "la redondance des 617 caractéristiques et le coût de calcul."
-        )
-        st.markdown(
-            "Le modèle optimisé atteint un **F1 macro de 84 %** (contre 82,8 %). Le gain profite "
-            "surtout à COVID et Normal : la précision COVID passe de 70 % à 77 %, mais au prix "
-            "d'un rappel qui recule de 75 % à 72 %."
+            "- **Pipeline optimisé :** StandardScaler $\rightarrow$ Réduction de dimension PCA (95 % variance) $\rightarrow$ SVM (SVC)\n"
+            "- **Méthode :** Recherche d'hyperparamètres C et gamma via `RandomizedSearchCV` (5-fold cross-validation)\n"
+            "- **Bénéfices PCA :** Réduction de la redondance des 617 variables et diminution massive du temps de calcul\n"
+            "- **Résultat :** Hausse du **F1-score macro à 84,0 %** (gain de +1,2 point)\n"
+            "- **Comportement COVID :** Précision en hausse (77 % vs 70 %), mais rappel en léger retrait (72 % vs 75 %)"
         )
         optim_report_column, optim_matrix_column = st.columns(2)
         with optim_report_column:
@@ -430,26 +347,15 @@ def main() -> None:
                 "5.3.1-optim_svm_confusion_matrix.png",
                 caption="Matrice de confusion — SVM optimisé",
             )
-        st.markdown(
-            "La matrice de confusion montre une légère baisse des confusions entre classes "
-            "pathologiques, notamment entre Lung Opacity et COVID. Certaines images COVID "
-            "restent toutefois classées comme Normal, ce qui illustre la difficulté à séparer "
-            "ces deux catégories à partir des seules caractéristiques manuelles."
-        )
 
         st.subheader("Conclusion")
         st.markdown(
-            "Le SVM constitue une **baseline solide (F1 macro 84 %)**. Les gains de "
-            "l'optimisation restent modestes : le facteur limitant n'est plus le classifieur "
-            "mais le **pouvoir discriminant des caractéristiques extraites**, en particulier "
-            "pour COVID dont les manifestations chevauchent celles de Lung Opacity."
+            "- **Baseline solide :** F1-score macro de 84 % atteint après optimisation\n"
+            "- **Palier de performance :** Les gains marginaux indiquent que le classifieur n'est pas le facteur limitant\n"
+            "- **Verdict :** Le pouvoir discriminant des caractéristiques manuelles (STAT, LBP, HOG) atteint ses limites physiques"
         )
         st.info(
-            "Le **KNN** a également été testé comme baseline. Sa meilleure configuration "
-            "(STAT + LBP) atteint un F1 macro de 74,5 % (75,5 % après optimisation), nettement "
-            "en dessous du SVM. Sur la classe COVID : précision 70 % et rappel 61 % (baseline), "
-            "78 % et 59 % après optimisation. Le KNN souffre de la grande dimension de l'espace "
-            "des caractéristiques (curse of dimensionality)."
+            "Le **KNN** a également été testé comme baseline. Sa meilleure configuration (STAT + LBP) atteint un F1 macro de 74,5 % (75,5 % après optimisation), nettement en dessous du SVM. Le KNN souffre de la grande dimension de l'espace des caractéristiques (curse of dimensionality)."
         )
     elif section.startswith("6."):
         section_header(
@@ -458,21 +364,16 @@ def main() -> None:
             "XGBoost sur les caractéristiques extraites",
         )
         st.markdown(
-            "L'approche ensemble s'appuie sur **XGBoost** (Extreme Gradient Boosting), qui "
-            "construit successivement des arbres de décision pour corriger progressivement les "
-            "erreurs des précédents. Il est réputé efficace sur données tabulaires et capable "
-            "de modéliser des relations non linéaires entre les caractéristiques."
+            "- **Algorithme d'ensemble :** Boosting de gradients sur des arbres de décision séquentiels (XGBoost)\n"
+            "- **Avantages clés :** Extrêmement efficace sur données tabulaires, capture native des relations non linéaires"
         )
 
         impl_column, metric_column = st.columns(2)
         with impl_column:
             st.subheader("Implémentation")
             st.markdown(
-                "Contrairement au SVM et au KNN, XGBoost **ne nécessite pas de "
-                "standardisation** : les arbres séparent les données par seuils et sont donc "
-                "insensibles à l'échelle des variables. Le modèle est d'abord entraîné avec les "
-                "paramètres par défaut de `XGBClassifier`, sur les mêmes jeux de "
-                "caractéristiques que la baseline."
+                "- **Sans standardisation :** Les arbres de décision séparent par seuil et sont insensibles aux échelles de variables\n"
+                "- **Évaluation :** Entraînement initial sur les configurations brutes par défaut avant réglage fin"
             )
         with metric_column:
             st.subheader("Métriques observées")
@@ -484,10 +385,12 @@ def main() -> None:
 
         st.subheader("Résultats")
         st.markdown(
-            "XGBoost dépasse les deux baselines quel que soit le jeu de caractéristiques. "
-            "HOG seul atteint 76,4 %, STAT + LBP 80,4 %, et la meilleure combinaison "
-            "**STAT + LBP + HOG** atteint un **F1 macro de 86,2 %** — au-dessus du SVM optimisé "
-            "(84,0 %) et du KNN (75,5 %)."
+            "- **Domination baseline :** XGBoost surpasse systématiquement le SVM et le KNN sur tous les jeux de données\n"
+            "- **Meilleure performance brute :** **STAT + LBP + HOG** atteint un **F1-score macro de 86,2 %** (sans aucune optimisation)\n"
+            "- **Synthèse par classe :**\n"
+            "  - **Normal & Viral Pneumonia :** Excellents scores (F1 0,90 et 0,92)\n"
+            "  - **Lung Opacity :** Très stable (F1 0,84)\n"
+            "  - **COVID :** Reste la classe la plus complexe (F1 0,79 ; précision 86 % ; rappel 73 %)"
         )
         results_column, report_column = st.columns(2)
         with results_column:
@@ -497,23 +400,13 @@ def main() -> None:
                 "6.1.1-xgb_classification_report.png",
                 caption="Rapport de classification XGBoost",
             )
-        st.markdown(
-            "Normal (F1 0,90) et Viral Pneumonia (F1 0,92) sont les mieux reconnues, Lung "
-            "Opacity reste élevée (0,84). COVID demeure la plus difficile (F1 0,79 ; précision "
-            "86 % ; rappel 73 %) : sa détection reste l'axe d'amélioration principal."
-        )
 
         st.subheader("Optimisation")
         st.markdown(
-            "Optimisation en deux temps (exploration large puis affinage) via "
-            "**RandomizedSearchCV** en validation croisée stratifiée à 5 folds sur le F1 macro. "
-            "Hyperparamètres explorés : nombre d'arbres, taux d'apprentissage, profondeur "
-            "maximale, proportion de variables par arbre, minimum d'exemples par nœud et gamma."
-        )
-        st.markdown(
-            "Le modèle optimisé atteint un **F1 macro de 87,0 %** (contre 86,2 %). COVID "
-            "progresse légèrement (F1 0,80, +1 point en précision et en rappel) ; Normal 0,91 "
-            "et Viral Pneumonia 0,93 conservent d'excellents résultats."
+            "- **Stratégie d'optimisation :** Exploration large suivie d'un affinage ciblé via `RandomizedSearchCV` (5 folds)\n"
+            "- **Variables ajustées :** `n_estimators`, `learning_rate`, `max_depth`, `subsample`, `min_child_weight` et `gamma`\n"
+            "- **Performances finales :** Progression du **F1-score macro à 87,0 %** (+0,8 %)\n"
+            "- **Comportement COVID :** Amélioration d'un point (F1 0,80, précision 87 %, rappel 74 %)"
         )
         optim_report_column, optim_matrix_column = st.columns(2)
         with optim_report_column:
@@ -526,24 +419,15 @@ def main() -> None:
                 "6.2.1-optim_xgb_confusion_matrix.png",
                 caption="Matrice de confusion — XGBoost optimisé",
             )
-        st.markdown(
-            "Les confusions COVID/Normal et Normal/Lung Opacity diminuent légèrement. Les "
-            "erreurs restantes concernent surtout des cas COVID prédits Normal ou Lung Opacity, "
-            "cohérent avec la similarité radiologique de ces pathologies."
-        )
 
         st.subheader("Conclusion")
         st.markdown(
-            "XGBoost obtient les **meilleures performances des modèles sur caractéristiques "
-            "manuelles (F1 macro 87 %)**, sans nouveau prétraitement. Les gains d'optimisation "
-            "modestes montrent que la limite vient désormais du **pouvoir discriminant des "
-            "caractéristiques**, ce qui justifie le passage au deep learning."
+            "- **Champion classique :** XGBoost est le meilleur modèle sur descripteurs manuels avec **87,0 % de F1 macro**\n"
+            "- **Saturation du signal :** Les gains marginaux d'optimisation confirment la saturation des caractéristiques manuelles\n"
+            "- **Transition logique :** Nécessité de basculer vers le **Deep Learning** pour que le modèle extrait lui-même ses propres descripteurs"
         )
         st.info(
-            "**Limite** : contrairement au SVM, ce XGBoost n'intègre pas de compensation du "
-            "déséquilibre des classes. Des pistes comme la pondération des observations "
-            "(`sample_weight`) ou le sur-échantillonnage (SMOTE) pourraient améliorer la "
-            "détection des classes minoritaires, à évaluer sur le F1 macro et le rappel COVID."
+            "**Limite** : contrairement au SVM, ce XGBoost n'intègre pas de compensation du déséquilibre des classes. Des pistes comme la pondération des observations (`sample_weight`) ou le sur-échantillonnage (SMOTE) pourraient améliorer la détection des classes minoritaires."
         )
     elif section.startswith("7."):
         section_header(
@@ -552,16 +436,12 @@ def main() -> None:
             "Transfer learning à partir d'un réseau pré-entraîné sur ImageNet",
         )
         st.markdown(
-            "**ResNet-50** est un réseau convolutif de référence. Ses **connexions résiduelles** "
-            "(skip connections) facilitent l'optimisation des réseaux profonds en limitant la "
-            "disparition du gradient. Il compte 50 couches apprenables organisées autour d'une "
-            "convolution initiale et de 4 blocs résiduels (layer1 à layer4)."
-        )
-        st.markdown(
-            "**Transfer learning** : le réseau est initialisé avec les poids ImageNet, puis sa "
-            "dernière couche (1000 classes) est remplacée par une couche linéaire à **4 sorties** "
-            "(Normal, COVID, Lung Opacity, Viral Pneumonia). Tous les paramètres sont ensuite "
-            "réentraînés sur les radiographies pré-traitées (segmentées + CLAHE)."
+            "- **Architecture de référence :** ResNet-50 (50 couches de convolutions apprenables)\n"
+            "- **Skip Connections :** Connexions résiduelles limitant la disparition du gradient et stabilisant l'optimisation\n"
+            "- **Stratégie de Transfer Learning :**\n"
+            "  - Initialisation des poids pré-entraînés sur **ImageNet**\n"
+            "  - Remplacement de la tête de classification par une couche linéaire à **4 classes**\n"
+            "  - Fine-tuning complet de tous les paramètres sur nos radiographies segmentées + CLAHE"
         )
         show_figure("7.1.2-resnet_architecture.png", caption="Architecture ResNet et connexions résiduelles")
 
@@ -593,21 +473,19 @@ def main() -> None:
 
         st.subheader("Résultats")
         st.markdown(
-            "Le modèle atteint une **accuracy de 93 %** et un **F1 macro de 93,8 %**. Le faible "
-            "écart avec le F1 pondéré (93,0 %) confirme une bonne robustesse au déséquilibre."
+            "- **Saut de performance massif :** **F1-score macro de 93,8 %** et **Accuracy globale de 93,0 %**\n"
+            "- **Robustesse au déséquilibre :** Écart minime entre F1 macro et F1 pondéré\n"
+            "- **Analyse par classe :**\n"
+            "  - **Viral Pneumonia :** Détection exceptionnelle (F1 0,96 ; précision 98 %)\n"
+            "  - **Normal & COVID :** Très performantes (F1 0,94 et 0,93 ; précision COVID de 96 %)\n"
+            "  - **Lung Opacity :** Reste la classe la plus complexe (F1 0,91)\n"
+            "  - **Point d'attention métier :** Rappel COVID de 91 % ($\approx$ 9 % de faux négatifs à surveiller en clinique)"
         )
         report_column, matrix_column = st.columns(2)
         with report_column:
             show_figure("7.2.1-resnet50_classification_report.png", caption="Rapport de classification ResNet-50")
         with matrix_column:
             show_figure("7.2.1-resnet50_confusion_matrix.png", caption="Matrice de confusion ResNet-50")
-        st.markdown(
-            "Viral Pneumonia est la mieux reconnue (F1 0,96 ; précision 98 %), COVID (F1 0,93 ; "
-            "précision 96 % ; rappel 91 %) et Normal (F1 0,94) sont élevées, Lung Opacity reste "
-            "la plus difficile (F1 0,91). Les erreurs concernent surtout Lung Opacity ↔ Normal "
-            "et COVID → Normal ; le rappel COVID de 91 % (≈ 9 % de cas manqués) reste le point "
-            "d'attention métier."
-        )
     elif section.startswith("8."):
         section_header(
             8,
@@ -615,15 +493,11 @@ def main() -> None:
             "Un réseau convolutif conçu et entraîné entièrement depuis zéro",
         )
         st.markdown(
-            "Ce modèle est entraîné **sans aucun pré-entraînement**, pour mesurer l'apport réel "
-            "du transfer learning et contrôler entièrement l'architecture. Elle s'inspire de "
-            "**VGG** : 5 blocs convolutifs dont le nombre de filtres double (32 → 512) avec "
-            "MaxPooling, chacun suivi de **BatchNorm** et **ReLU**."
-        )
-        st.markdown(
-            "En sortie, un **Global Average Pooling** réduit fortement le nombre de paramètres "
-            "(moins de surapprentissage), suivi de deux couches fully connected entrecoupées de "
-            "**Dropout** (0,4 puis 0,3)."
+            "- **Entraînement \"from scratch\" :** Zéro pré-entraînement pour isoler l'apport réel du Transfer Learning\n"
+            "- **Architecture inspirée de VGG :** 5 blocs convolutifs doublant le nombre de filtres (32 $\rightarrow$ 512) avec MaxPooling\n"
+            "- **Régularisation et réduction :**\n"
+            "  - **Global Average Pooling (GAP) :** Réduction massive du nombre de paramètres pour limiter le surapprentissage\n"
+            "  - **Tête Fully Connected :** Deux couches denses avec des taux de **Dropout** régulés (0,4 et 0,3)"
         )
         show_figure("7.1.3-cnn_fscratch_architecture.png", caption="Architecture du Custom CNN inspiré de VGG")
 
@@ -645,34 +519,26 @@ def main() -> None:
 
         st.subheader("Résultats")
         st.markdown(
-            "Le modèle atteint une **accuracy de 90,6 %** et un **F1 macro de 91 %**, soit "
-            "environ 3 points sous ResNet-50, mais solide sans pré-entraînement."
+            "- **Performances très solides :** **91,0 % de F1-score macro** et **Accuracy globale de 90,6 %**\n"
+            "- **Verdict :** Seulement 3 points de retard sur ResNet-50, un score impressionnant sans pré-entraînement !\n"
+            "- **Profil des classes :**\n"
+            "  - **Viral Pneumonia :** Excellente performance (F1 0,95)\n"
+            "  - **Normal :** Stable (F1 0,93)\n"
+            "  - **COVID :** Très convenable (F1 0,88 ; précision 90 % ; rappel 85 %)\n"
+            "  - **Lung Opacity :** Reste en retrait (F1 0,88)"
         )
         cnn_report_column, cnn_matrix_column = st.columns(2)
         with cnn_report_column:
             show_figure("7.2.2-cnn_fscratch_classification_report.png", caption="Rapport de classification Custom CNN")
         with cnn_matrix_column:
             show_figure("7.2.2-cnn_fscratch_confusion_matrix.png", caption="Matrice de confusion Custom CNN")
-        st.markdown(
-            "La hiérarchie par classe est proche de ResNet-50 : Viral Pneumonia la mieux "
-            "reconnue (F1 0,95), Normal 0,93, COVID 0,88 (précision 90 % ; rappel 85 %), Lung "
-            "Opacity la plus difficile (F1 0,88). Les mêmes confusions dominent : "
-            "Lung Opacity ↔ Normal et COVID ↔ Normal."
-        )
 
         st.subheader("Conclusion — Deep Learning")
         st.markdown(
-            "Le deep learning améliore nettement la classification par rapport au machine "
-            "learning classique : **ResNet-50 atteint 93,8 % de F1 macro**, contre **91 % pour "
-            "le Custom CNN**. Cet écart d'environ 3 points illustre l'apport concret du "
-            "transfer learning, tout en montrant qu'une architecture entraînée depuis zéro "
-            "reste compétitive avec une régularisation adaptée (Dropout, augmentation, gradient "
-            "clipping)."
-        )
-        st.markdown(
-            "Les deux modèles rencontrent les **mêmes difficultés** (Normal ↔ Lung Opacity et "
-            "COVID ↔ Normal), ce qui suggère une **ambiguïté radiologique intrinsèque** entre "
-            "ces pathologies plutôt qu'une limite propre à une architecture."
+            "- **Saut qualitatif du Deep Learning :** ResNet-50 (93,8 % F1) et Custom CNN (91,0 % F1) écrasent le machine learning classique\n"
+            "- **Apport du Transfer Learning :** Le gain de +2,8 points valide l'efficacité des poids d'initialisation pré-entraînés (ImageNet)\n"
+            "- **Performance brute \"from scratch\" :** Le Custom CNN démontre qu'avec une forte régularisation (augmentation, dropout, gradient clipping), entraîner un modèle à partir de zéro reste extrêmement compétitif\n"
+            "- **Constat d'ambiguïté visuelle :** Les deux architectures butent sur les mêmes confusions (Normal ↔ Opacités, COVID ↔ Normal) ↔ traduit une **ambiguïté clinique intrinsèque** des images plutôt qu'un défaut de modélisation"
         )
     elif section.startswith("9."):
         section_header(
@@ -681,17 +547,11 @@ def main() -> None:
             "Comprendre les décisions du modèle avec Grad-CAM",
         )
         st.markdown(
-            "Les CNN sont souvent des **boîtes noires**. **Grad-CAM** (Gradient-weighted Class "
-            "Activation Mapping) exploite les gradients de la rétropropagation pour pondérer les "
-            "cartes de caractéristiques d'une couche convolutive et produire une **heatmap** des "
-            "régions ayant le plus contribué à la décision — une interprétation directement liée "
-            "au processus de classification."
-        )
-        st.markdown(
-            "Les cartes sont générées à la sortie des **4 blocs convolutifs** de ResNet-50 "
-            "(conv_block_1 à conv_block_4), pour observer l'évolution des représentations : des "
-            "caractéristiques de bas niveau (contours, textures) vers les zones discriminantes "
-            "de la classification finale. Les exemples ci-dessous concernent **ResNet-50**."
+            "- **Casser l'effet \"boîte noire\" :** Grad-CAM rend explicites et visuelles les décisions prises par le modèle profond\n"
+            "- **Mécanisme :** Exploitation des gradients rétropropagés pour pondérer les activations et générer une **heatmap** d'influence\n"
+            "- **Suivi multi-niveaux :** Génération des heatmaps à la sortie des **4 blocs convolutifs** de ResNet-50 pour observer l'abstraction :\n"
+            "  - **conv_block_1 (bas niveau) :** Détection des textures, contours et formes générales de la cage thoracique\n"
+            "  - **conv_block_4 (haut niveau) :** Focus précis et abstrait sur les anomalies pathologiques cibles"
         )
 
         st.subheader("Exemple 1 — Prédiction correcte")
@@ -739,21 +599,17 @@ def main() -> None:
             "Comparaison des approches, limites et perspectives",
         )
         st.markdown(
-            "Le projet a couvert toute la chaîne de traitement — analyse, prétraitement, "
-            "machine learning et deep learning — évaluée sur un **même jeu de test**. Le "
-            "**F1-score macro** est la métrique principale, complétée par le **rappel** et la "
-            "**précision COVID**, un faux négatif COVID étant particulièrement critique."
+            "- **Pipeline de bout en bout :** Exploration de données, prétraitement, baselines classiques et architectures profondes\n"
+            "- **Évaluation unifiée :** Tous les modèles ont été comparés sur le **même jeu de test figé** pour une rigueur scientifique totale\n"
+            "- **Double priorité :** Optimiser le **F1-score macro** pour contrer le déséquilibre, tout en surveillant le **Rappel COVID** (réduire les faux négatifs cliniques)"
         )
         show_figure("8-synthesis_results.png", caption="Tableau récapitulatif des résultats par modèle")
 
         st.subheader("Résultats")
         st.markdown(
-            "Les approches **Deep Learning surpassent** le machine learning, en performance "
-            "globale comme sur la détection de COVID. Le Custom CNN (F1 0,91) dépasse déjà SVM "
-            "et XGBoost, et **ResNet-50 obtient les meilleurs résultats** de l'étude : "
-            "**F1 macro 0,94 ; rappel COVID 0,91 ; précision COVID 0,96**. Cela confirme "
-            "l'intérêt des CNN pour exploiter l'information spatiale et l'apport du transfer "
-            "learning."
+            "- **Victoire incontestable du Deep Learning :** Surpasse largement le machine learning sur toutes les métriques\n"
+            "- **ResNet-50 vainqueur de l'étude :** **F1-score macro de 93,8 %**, **Rappel COVID de 91,0 %**, et **Précision COVID de 96,0 %**\n"
+            "- **Explication scientifique :** Les CNN encodent de manière spatiale les textures et opacités complexes, là où les descripteurs manuels perdent l'information de structure"
         )
 
         limits_column, perspectives_column = st.columns(2)
@@ -764,16 +620,14 @@ def main() -> None:
                 "- **Coût de calcul** des CNN (régularisation + arrêt anticipé nécessaires)\n"
                 "- Pas de **courbes d'apprentissage** pour SVM/KNN/XGBoost (biais/variance)\n"
                 "- Pas de **courbes Precision-Recall** par classe (compromis selon le seuil)\n"
-                "- **Découpage** stratifié mais non garanti indépendant par patient/source "
-                "(risque de fuite de données)\n"
+                "- **Découpage** stratifié mais non garanti indépendant par patient/source (risque de fuite de données)\n"
                 "- **Masquage** non évalué par une étude d'ablation"
             )
         with perspectives_column:
             st.subheader("Perspectives")
             st.markdown(
                 "- Gérer le déséquilibre dans XGBoost (`sample_weight`, SMOTE)\n"
-                "- Comparer d'autres ensembles (Random Forest) et architectures pré-entraînées "
-                "(DenseNet, EfficientNet)\n"
+                "- Comparer d'autres ensembles (Random Forest) et architectures pré-entraînées (DenseNet, EfficientNet)\n"
                 "- **Étude d'ablation** du masquage avec ResNet-50\n"
                 "- Ajuster le **seuil COVID** via les courbes Precision-Recall\n"
                 "- Découpage par groupes + **jeu de données externe**\n"
