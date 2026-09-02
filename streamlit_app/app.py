@@ -115,7 +115,6 @@ def main() -> None:
             st.markdown(
                 "- **Classification automatique :** Détecter 4 pathologies à partir de radiographies pulmonaires 2D\n"
                 "- **Analyse comparative :** Évaluer et comparer le Machine Learning classique et le Deep Learning\n"
-                "- **Impact de la segmentation :** Étudier l'influence du masquage pulmonaire sur les performances\n"
                 "- **Explicabilité (Grad-CAM) :** Visualiser les régions pulmonaires décisionnelles pour les cliniciens"
             )
 
