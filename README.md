@@ -31,7 +31,8 @@ Le meilleur modèle est **ResNet-50**, qui sert de base à la démonstration.
 
 ## Technologies
 
-- **Python 3.14**
+- **Python 3.12**
+- **uv** — gestion de l'environnement et des dépendances
 - **PyTorch** / **torchvision** — deep learning (ResNet-50)
 - **grad-cam** — interprétabilité
 - **scikit-learn** / **XGBoost** — machine learning
@@ -40,23 +41,46 @@ Le meilleur modèle est **ResNet-50**, qui sert de base à la démonstration.
 
 ## Installation
 
-Python 3.14 est recommandé.
+Le projet utilise [uv](https://docs.astral.sh/uv/) pour gérer Python et les dépendances.
+
+1. Installer uv (une seule fois) :
 
 ```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux / macOS
-source .venv/bin/activate
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+# Linux / macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+2. Cloner le dépôt puis installer l'environnement :
+
+```bash
+git clone <url-du-depot>
+cd Analysis-of-COVID-19-Chest-X-rays
+uv sync
+```
+
+`uv sync` télécharge Python 3.12 si nécessaire, crée le dossier `.venv` et installe
+les versions exactes listées dans `uv.lock`. Il n'est pas nécessaire d'activer
+l'environnement manuellement.
+
+> **PyTorch et GPU** : le projet est configuré pour PyTorch avec CUDA 12.6
+> (index `pytorch-cu126` dans `pyproject.toml`). Prévoir environ 10 Go d'espace
+> libre pour l'installation. Sans GPU NVIDIA, remplacer `cu126` par `cpu` dans
+> l'URL de l'index et retirer le suffixe `+cu126` des versions de torch, puis
+> relancer `uv lock && uv sync`.
+
+Vérifier l'installation :
+
+```bash
+uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
 ## Lancer l'application
 
 ```bash
-streamlit run streamlit_app/app.py
+uv run streamlit run streamlit_app/app.py
 ```
 
 ## Utiliser la démonstration
@@ -75,4 +99,3 @@ La dernière section de l'application permet de tester le modèle sur une radiog
 ## Guide Développeur / Data Scientist
 
 Pour les développeurs et les data scientists souhaitant reproduire les entraînements de modèles, tester les différentes architectures de Machine Learning ou ajuster les hyperparamètres, veuillez consulter notre [Guide d'entraînement et de reproduction (DEVELOPER.md)](./DEVELOPER.md).
-
