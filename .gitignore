@@ -167,14 +167,8 @@ cython_debug/
 
 # Data folder
 # data
-data/raw
-data/processed
-data/ml_features
-data/features
-reports/figures/old
-data/dataset_pixel_statistics.csv
-data/ml_features.zip
-data/processed.zip
+data/*
+!data/demo_samples
 
 # Models weights
 *clahe.pkl
