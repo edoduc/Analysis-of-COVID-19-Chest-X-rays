@@ -7,7 +7,7 @@ import mlflow
 import mlflow.sklearn
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, recall_score
 
 from xgboost import XGBClassifier
 
@@ -54,6 +54,11 @@ def get_model(model_name, models_config):
             n_estimators=xgb_config.get("n_estimators", 150),
             learning_rate=xgb_config.get("learning_rate", 0.1),
             max_depth=xgb_config.get("max_depth", 4),
+            colsample_bytree=xgb_config.get("colsample_bytree", 0.9),
+            min_child_weight=xgb_config.get("min_child_weight", 1),
+            gamma=xgb_config.get("gamma", 0.0),
+            tree_method=xgb_config.get("tree_method", "hist"),
+            device=xgb_config.get("device", "cpu"),
             random_state=xgb_config.get("random_state", 42),
             n_jobs=-1
         )
@@ -86,10 +91,12 @@ def main():
     # 1. Load Data
     print(f"\n--- Preparing to train {args.model.upper()} ---")
     X_train, y_train = load_and_combine_features(FEATURES_DIR, "train", args.features)
-    X_test, y_test = load_and_combine_features(FEATURES_DIR, "test", args.features)
+    X_validation, y_validation = load_and_combine_features(
+        FEATURES_DIR, "validation", args.features
+    )
     
     print(f"Final Training Matrix Shape: {X_train.shape}")
-    print(f"Final Testing Matrix Shape: {X_test.shape}")
+    print(f"Final Validation Matrix Shape: {X_validation.shape}")
 
     # 2. Setup MLflow Tracking
     mlflow.set_experiment(args.exp_name)
@@ -112,17 +119,29 @@ def main():
         print("Training complete!")
         
         # 4. Quick Validation
-        print("Predicting on test set...")
-        y_pred = model.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred, average='weighted')
+        print("Evaluating on validation set...")
+        y_pred = model.predict(X_validation)
+        acc = accuracy_score(y_validation, y_pred)
+        f1 = f1_score(y_validation, y_pred, average='weighted')
+        f1_macro = f1_score(y_validation, y_pred, average='macro')
+        covid_index = 0
+        covid_recall = recall_score(
+            y_validation,
+            y_pred,
+            labels=[covid_index],
+            average="macro",
+            zero_division=0,
+        )
         
-        # Log metrics to MLflow
-        mlflow.log_metric("test_accuracy", acc)
-        mlflow.log_metric("test_f1_weighted", f1)
+        mlflow.log_metric("validation_accuracy", acc)
+        mlflow.log_metric("validation_f1_weighted", f1)
+        mlflow.log_metric("validation_f1_macro", f1_macro)
+        mlflow.log_metric("validation_recall_covid", covid_recall)
         
-        print(f"Test Accuracy: {acc:.4f}")
-        print(f"Test F1-Score: {f1:.4f}")
+        print(f"Validation Accuracy: {acc:.4f}")
+        print(f"Validation F1-Score (weighted): {f1:.4f}")
+        print(f"Validation F1-Score (macro): {f1_macro:.4f}")
+        print(f"Validation COVID Recall: {covid_recall:.4f}")
         
         # 5. Save the model locally and in MLflow
         model_filename = f"{args.model}_{'_'.join(args.features)}.joblib"

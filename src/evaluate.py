@@ -83,8 +83,16 @@ def evaluate_ml_model(model_path, features_dir, feature_list):
     feature_arrays = [np.load(features_dir / f"X_test_{feat}.npy") for feat in feature_list]
     X_test = np.hstack(feature_arrays)
     y_test = np.load(features_dir / f"y_test.npy")
+
+    feature_names = getattr(model, "feature_names_in_", None)
+    if feature_names is not None:
+        if X_test.shape[1] != len(feature_names):
+            raise ValueError(
+                f"Le modèle attend {len(feature_names)} features, reçu {X_test.shape[1]}."
+            )
+        X_test = pd.DataFrame(X_test, columns=feature_names)
     
-    print("Running inference on CPU...")
+    print("Running inference on test split...")
     y_pred = model.predict(X_test)
     
     # Try to get prediction probabilities if available
@@ -92,10 +100,12 @@ def evaluate_ml_model(model_path, features_dir, feature_list):
     return y_test, y_pred, y_prob
 
 def evaluate_deep_model(model_path, data_dir, arch='resnet50', img_size=(224, 224)):
-    """Loads a PyTorch model (ResNet50 or CustomCNN) and evaluates it using images from the processed directory."""
+    """Evaluate a PyTorch model on the fixed test split."""
     from torchvision import models, transforms
-    from torchvision.datasets import ImageFolder
-    from torch.utils.data import DataLoader, random_split
+    from torch.utils.data import DataLoader
+
+    from src.data_splits import load_split_manifest
+    from src.train_resnet_baseline import ManifestImageDataset
 
     print(f"Loading Deep Learning model ({arch}): {model_path.name}")
     
@@ -110,16 +120,9 @@ def evaluate_deep_model(model_path, data_dir, arch='resnet50', img_size=(224, 22
     else:
         raise ValueError(f"Architecture '{arch}' not recognized.")
     
-    # Load state dict
-    try:
-        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-        state_dict = checkpoint["model_state_dict"] if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint else checkpoint
-        model.load_state_dict(state_dict)
-    except Exception as e:
-        print(f"Warning: Loading with weights_only=False failed ({e}). Attempting with weights_only=True...")
-        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
-        state_dict = checkpoint["model_state_dict"] if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint else checkpoint
-        model.load_state_dict(state_dict)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=True)
+    state_dict = checkpoint["model_state_dict"] if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint else checkpoint
+    model.load_state_dict(state_dict)
 
     model = model.to(device).eval()
 
@@ -140,26 +143,25 @@ def evaluate_deep_model(model_path, data_dir, arch='resnet50', img_size=(224, 22
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-    # 3. Load Dataset
-    print(f"Loading local images from: {data_dir}")
-    full_dataset = ImageFolder(root=str(data_dir), transform=eval_transform)
-    
-    # Replicate the validation split (20% validation subset with seed 42)
-    generator = torch.Generator().manual_seed(42)
-    val_size = int(0.2 * len(full_dataset))
-    train_size = len(full_dataset) - val_size
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size], generator=generator)
-    
-    # Run inference on validation subset
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+    print(f"Loading fixed test split from: {data_dir}")
+    project_root = Path(__file__).resolve().parents[1]
+    manifest_path = project_root / "data" / "splits.csv"
+    manifest = load_split_manifest(manifest_path, data_dir)
+    test_dataset = ManifestImageDataset(
+        manifest,
+        Path(data_dir).resolve(),
+        "test",
+        eval_transform,
+    )
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
     
     y_true = []
     y_pred = []
     y_prob = []
     
-    print(f"Running inference on PyTorch model ({arch})...")
+    print(f"Running inference on PyTorch model ({arch}) on the test split...")
     with torch.no_grad():
-        for inputs, targets in val_loader:
+        for inputs, targets in test_loader:
             inputs = inputs.to(device)
             outputs = model(inputs)
             probs = torch.softmax(outputs, dim=1)
@@ -205,7 +207,14 @@ def main():
     model_path = MODELS_DIR / args.filename
     if not model_path.exists():
         # Fallback search across folders
-        for folder in ["resnet50", "custom_cnn", "saved_models"]:
+        for folder in [
+            "resnet50",
+            "custom_cnn",
+            "saved_models",
+            "xgboost",
+            "support_vector_machine",
+            "k_nearest_neighbors",
+        ]:
             fallback_path = PROJECT_ROOT / "models" / folder / args.filename
             if fallback_path.exists():
                 model_path = fallback_path

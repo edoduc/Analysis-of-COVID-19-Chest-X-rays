@@ -3,6 +3,9 @@ import streamlit as st
 from PIL import Image
 
 from streamlit_app.config import CLASS_NAMES, MODEL_PATH, MODEL_SIZE, TORCH_AVAILABLE
+from src.inference import get_eval_transform, load_resnet50, predict
+
+__all__ = ["get_eval_transform", "load_resnet50", "predict"]
 
 
 def _require_torch():

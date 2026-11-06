@@ -1,40 +1,26 @@
-import os
 import cv2
 import numpy as np
 import argparse
 import json
 from tqdm import tqdm
 from pathlib import Path
+from src.constants import CLASS_NAMES, PREPROCESS_SIZE
 
-# Setup argument parser for scalable config loading
-parser = argparse.ArgumentParser(description="Preprocess X-Ray Images")
-parser.add_argument("--config", type=str, default="config.json", help="Path to config file")
-args, unknown = parser.parse_known_args()
-
-# Load configuration safely
-with open(args.config, "r") as f:
-    config = json.load(f)
-
-# Use pathlib for robust path handling
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DATA_DIR = PROJECT_ROOT / config["paths"]["raw_data_dir"]
-OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
-IMG_SIZE = config.get("image_size", 299)
-
-CLASSES = [
-    "Normal",
-    "COVID",
-    "Lung_Opacity",
-    "Viral Pneumonia"
-]
+IMG_SIZE = PREPROCESS_SIZE
+CLASSES = CLASS_NAMES
 
 def load_image_from_path(image_path: Path, size: int = IMG_SIZE) -> np.ndarray:
     image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if image is None:
+        raise ValueError(f"Image illisible : {image_path}")
     image = cv2.resize(image, (size, size), interpolation=cv2.INTER_AREA)
     return image.astype(np.float32)
 
 def load_mask_from_path(mask_path: Path, size: int = IMG_SIZE) -> np.ndarray:
     mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        raise ValueError(f"Masque illisible : {mask_path}")
     mask = cv2.resize(mask, (size, size), interpolation=cv2.INTER_NEAREST)
     return (mask > 0).astype(np.float32)
 
@@ -68,13 +54,32 @@ def apply_clahe_nonzero(image: np.ndarray) -> np.ndarray:
     return result.astype(np.float32)
 
 def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(description="Preprocess X-Ray Images")
+    parser.add_argument("--config", type=str, default="config.json", help="Path to config file")
+    args, _ = parser.parse_known_args()
+    config_path = Path(args.config)
+    if not config_path.is_absolute():
+        config_path = PROJECT_ROOT / config_path
+    with config_path.open(encoding="utf-8") as config_file:
+        config = json.load(config_file)
+
+    raw_data_dir = Path(config["paths"]["raw_data_dir"])
+    if not raw_data_dir.is_absolute():
+        raw_data_dir = PROJECT_ROOT / raw_data_dir
+    output_dir = PROJECT_ROOT / "data" / "processed"
+    image_size = int(config.get("image_size", IMG_SIZE))
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     for cls in CLASSES:
-        image_dir = RAW_DATA_DIR / cls / "images"
-        mask_dir = RAW_DATA_DIR / cls / "masks"
+        image_dir = raw_data_dir / cls / "images"
+        mask_dir = raw_data_dir / cls / "masks"
 
-        output_class_dir = OUTPUT_DIR / cls
+        if not image_dir.is_dir():
+            raise FileNotFoundError(f"Dossier d'images introuvable : {image_dir}")
+        if not mask_dir.is_dir():
+            raise FileNotFoundError(f"Dossier de masques introuvable : {mask_dir}")
+
+        output_class_dir = output_dir / cls
         output_class_dir.mkdir(parents=True, exist_ok=True)
         
         image_paths = [p for p in image_dir.iterdir() if p.is_file()]
@@ -87,8 +92,8 @@ def main():
                 continue
 
             # 1. LOAD
-            image = load_image_from_path(image_path)
-            mask = load_mask_from_path(mask_path)
+            image = load_image_from_path(image_path, size=image_size)
+            mask = load_mask_from_path(mask_path, size=image_size)
             
             # 2. MASK
             masked = image * mask
@@ -101,7 +106,7 @@ def main():
             
             # 5. RESIZE
             resized = cv2.resize(
-                padded, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_LINEAR
+                padded, (image_size, image_size), interpolation=cv2.INTER_LINEAR
             ).astype(np.float32)
             
             # 6. CLAHE (nonzero pixels)

@@ -1,14 +1,13 @@
 from pathlib import Path
 import importlib.util
 
+from src.constants import CLASS_NAMES, MODEL_SIZE, PREPROCESS_SIZE
+from src.inference import get_model_path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 FIGURES_DIR = ROOT_DIR / "reports" / "figures"
-MODEL_PATH = ROOT_DIR / "models" / "resnet50" / "resnet50_best.pth"
+MODEL_PATH = get_model_path()
 DEMO_DIR = ROOT_DIR / "data" / "demo_samples"
 
-CLASS_NAMES = ["COVID", "Lung_Opacity", "Normal", "Viral Pneumonia"]
-PREPROCESS_SIZE = 299
-MODEL_SIZE = 224
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 DEVICE = None

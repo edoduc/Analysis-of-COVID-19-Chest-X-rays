@@ -1,0 +1,50 @@
+services:
+  api:
+    build: .
+    command:
+      - uv
+      - run
+      - --no-sync
+      - uvicorn
+      - api.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      XGBOOST_MODEL_PATH: ${XGBOOST_MODEL_PATH:-/app/models/xgboost/xgb_best.pkl}
+      XGBOOST_MODEL_VERSION: ${XGBOOST_MODEL_VERSION:-xgb_best}
+      INFERENCE_CONFIDENCE_THRESHOLD: ${INFERENCE_CONFIDENCE_THRESHOLD:-0.5}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
+      MAX_IMAGE_PIXELS: ${MAX_IMAGE_PIXELS:-20000000}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  streamlit:
+    build: .
+    command:
+      - uv
+      - run
+      - --no-sync
+      - streamlit
+      - run
+      - streamlit_app/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+    environment:
+      INFERENCE_API_URL: http://api:8000
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    depends_on:
+      api:
+        condition: service_healthy

@@ -1,4 +1,5 @@
 import hashlib
+import os
 from io import BytesIO
 from pathlib import Path
 
@@ -40,7 +41,9 @@ def _select_one(active_folder: str) -> None:
 
 
 def render() -> None:
-    section_header(11, "Démonstration ResNet-50",
+    api_url = os.environ.get("INFERENCE_API_URL")
+    model_label = "XGBoost" if api_url else "ResNet-50"
+    section_header(11, f"Démonstration {model_label}",
                    "Sélection, pré-traitement et prédiction")
 
     # Image source selector
@@ -58,6 +61,8 @@ def render() -> None:
 
     image_bytes = None
     mask_bytes = None
+    image_name = "image.png"
+    mask_name = "mask.png"
     raw_image = None
     canonical_class = "Inconnu"
 
@@ -84,8 +89,11 @@ def render() -> None:
 
         canonical_class = next(cls for _, folder, cls in CLASS_FOLDERS if folder == active_folder)
         image_bytes = selected.read_bytes()
+        image_name = selected.name
         mask_path = selected.with_name(f"{selected.stem}_mask{selected.suffix}")
         mask_bytes = mask_path.read_bytes() if mask_path.exists() else None
+        if mask_bytes is not None:
+            mask_name = mask_path.name
         raw_image = Image.open(selected).convert("L")
 
     else:
@@ -116,8 +124,10 @@ def render() -> None:
             return
 
         image_bytes = uploaded_img.getvalue()
+        image_name = uploaded_img.name
         if uploaded_mask is not None:
             mask_bytes = uploaded_mask.getvalue()
+            mask_name = uploaded_mask.name
         raw_image = Image.open(BytesIO(image_bytes)).convert("L")
 
     # Update cache and clear predictions if the selected/uploaded image content changed
@@ -145,16 +155,59 @@ def render() -> None:
             clahe_image = np.clip(
                 st.session_state.demo_steps["clahe"], 0, 255).astype("uint8")
             st.image(clahe_image, caption="Image pré-traitée", width="stretch")
-            if not TORCH_AVAILABLE:
+            if not TORCH_AVAILABLE and not api_url:
                 st.warning(
                     "PyTorch n'est pas installé : la prédiction est indisponible."
                 )
-            elif st.button("Prédire avec ResNet-50", type="primary", width="stretch"):
-                from streamlit_app.core.model import predict
-
+            elif st.button(
+                f"Prédire avec {model_label}",
+                type="primary",
+                width="stretch",
+            ):
                 with st.spinner("Prédiction en cours…"):
-                    st.session_state.demo_prediction = predict(
-                        st.session_state.demo_steps["clahe"])
+                    if api_url:
+                        from streamlit_app.core.inference_client import predict_from_api
+
+                        try:
+                            st.session_state.demo_prediction = predict_from_api(
+                                image_bytes,
+                                mask_bytes,
+                                image_name=image_name,
+                                mask_name=mask_name,
+                            )
+                        except Exception:
+                            st.error("Le service d'inférence est indisponible.")
+                    else:
+                        if mask_bytes is None:
+                            st.session_state.demo_prediction = {
+                                "decision": "review_required",
+                                "decision_reason": "lung_mask_missing",
+                                "class_name": None,
+                                "candidate_class": None,
+                                "class_index": None,
+                                "probabilities": [0.0] * len(CLASS_NAMES),
+                                "confidence": 0.0,
+                                "confidence_threshold": 0.5,
+                                "confidence_calibrated": False,
+                                "model_version": "local",
+                                "mask_used": False,
+                            }
+                        else:
+                            from streamlit_app.core.model import predict
+
+                            st.session_state.demo_prediction = predict(
+                                st.session_state.demo_steps["clahe"]
+                            )
+                            st.session_state.demo_prediction.update(
+                                {
+                                    "decision": "prediction",
+                                    "decision_reason": None,
+                                    "confidence_threshold": 0.5,
+                                    "confidence_calibrated": False,
+                                    "model_version": "resnet50_best",
+                                    "mask_used": True,
+                                }
+                            )
                 st.session_state.demo_cam = None
 
     prediction = st.session_state.get("demo_prediction")
@@ -168,19 +221,33 @@ def render() -> None:
         else:
             col_predicted, col_confidence, col_chart = st.columns([1, 1, 2])
             
-        col_predicted.metric("Classe prédite", str(prediction["class_name"]))
+        if prediction.get("decision") == "review_required":
+            col_predicted.metric("Décision", "Revue requise")
+            if prediction.get("decision_reason") == "lung_mask_missing":
+                st.warning("Masque absent : revue humaine requise pour éviter une prédiction incohérente.")
+            elif prediction.get("decision_reason") == "confidence_below_threshold":
+                st.warning("Confiance insuffisante : revue humaine requise.")
+        else:
+            col_predicted.metric("Classe prédite", str(prediction["class_name"]))
+        confidence = prediction.get("confidence")
         col_confidence.metric(
-            "Confiance", f"{float(prediction['confidence']):.1%}")
+            "Confiance", f"{float(confidence):.1%}" if confidence is not None else "N/A"
+        )
             
         with col_chart:
-            probabilities = pd.DataFrame(
-                {"Probabilité": [float(p) for p in prediction["probabilities"]]},
-                index=CLASS_NAMES,
-            )
-            st.bar_chart(probabilities)
+            if prediction.get("probabilities"):
+                probabilities = pd.DataFrame(
+                    {"Probabilité": [float(p) for p in prediction["probabilities"]]},
+                    index=CLASS_NAMES,
+                )
+                st.bar_chart(probabilities)
+            else:
+                st.caption("Probabilités indisponibles sans masque pulmonaire.")
             
         if show_validation:
-            if prediction["class_name"] == canonical_class:
+            if prediction.get("decision") == "review_required":
+                pass
+            elif prediction["class_name"] == canonical_class:
                 st.success(
                     f"Prédiction correcte — label attendu : {canonical_class}"
                 )
@@ -189,7 +256,9 @@ def render() -> None:
                     f"Prédiction incorrecte — label attendu : {canonical_class}"
                 )
                 
-        if st.button("Interpréter avec Grad-CAM", type="primary", width="stretch"):
+        if api_url:
+            st.caption("Grad-CAM n'est pas disponible pour le modèle XGBoost.")
+        elif st.button("Interpréter avec Grad-CAM", type="primary", width="stretch"):
             from streamlit_app.core.gradcam import compute_gradcam
             from streamlit_app.core.model import load_resnet50
 

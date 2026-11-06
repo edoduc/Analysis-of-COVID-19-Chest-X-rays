@@ -104,7 +104,8 @@ def extract_hog_features(image,
     return features
 
 
-from data_loader import DatasetLoader 
+from src.constants import CLASS_NAMES, PREPROCESS_SIZE
+from src.data_splits import load_image_split
 
 def process_and_save_features(X_images, y_labels, split_name, output_dir, lbp_config, hog_config):
     """
@@ -165,16 +166,24 @@ def main():
     lbp_config = fe_config.get("lbp", {})
     hog_config = fe_config.get("hog", {})
 
-    # 2. Load the dataset (Memory efficient)
-    loader = DatasetLoader(data_dir=DATA_DIR)
-    X_train, X_test, y_train, y_test, label_encoder = loader.get_train_test_split()
-    
-    # 3. Save label encoder classes to know what 0,1,2,3 map to later
-    np.save(FEATURES_DIR / "classes.npy", label_encoder.classes_)
-    
-    # 4. Extract and Save
-    process_and_save_features(X_train, y_train, split_name="train", output_dir=FEATURES_DIR, lbp_config=lbp_config, hog_config=hog_config)
-    process_and_save_features(X_test, y_test, split_name="test", output_dir=FEATURES_DIR, lbp_config=lbp_config, hog_config=hog_config)
+    manifest_path = PROJECT_ROOT / "data" / "splits.csv"
+    np.save(FEATURES_DIR / "classes.npy", np.asarray(CLASS_NAMES))
+
+    for split_name in ("train", "validation", "test"):
+        X_split, y_split = load_image_split(
+            manifest_path=manifest_path,
+            processed_dir=DATA_DIR,
+            split_name=split_name,
+            image_size=(PREPROCESS_SIZE, PREPROCESS_SIZE),
+        )
+        process_and_save_features(
+            X_split,
+            y_split,
+            split_name=split_name,
+            output_dir=FEATURES_DIR,
+            lbp_config=lbp_config,
+            hog_config=hog_config,
+        )
     
     print("\nAll feature extraction completed successfully!")
 

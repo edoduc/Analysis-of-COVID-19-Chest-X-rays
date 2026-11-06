@@ -1,0 +1,17 @@
+.git/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+mlruns/
+data/raw/
+data/processed/
+data/features/
+data/train/
+data/test/
+data/splits.csv
+models/*
+!models/xgboost/
+models/xgboost/*
+!models/xgboost/xgb_best.pkl
+notebooks/
