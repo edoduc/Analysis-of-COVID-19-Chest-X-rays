@@ -52,7 +52,7 @@ def render() -> None:
         ["Échantillons de démonstration", "Importer ma propre radiographie"],
         horizontal=True
     )
-    
+
     # State reset on source type toggle
     if st.session_state.get("_last_source_type") != source_type:
         st.session_state._last_source_type = source_type
@@ -82,15 +82,18 @@ def render() -> None:
                 )
 
         active_folder = st.session_state.get("active_folder")
-        selected = st.session_state.get(f"sel_{active_folder}") if active_folder else None
-        
+        selected = st.session_state.get(
+            f"sel_{active_folder}") if active_folder else None
+
         if selected is None:
             return
 
-        canonical_class = next(cls for _, folder, cls in CLASS_FOLDERS if folder == active_folder)
+        canonical_class = next(
+            cls for _, folder, cls in CLASS_FOLDERS if folder == active_folder)
         image_bytes = selected.read_bytes()
         image_name = selected.name
-        mask_path = selected.with_name(f"{selected.stem}_mask{selected.suffix}")
+        mask_path = selected.with_name(
+            f"{selected.stem}_mask{selected.suffix}")
         mask_bytes = mask_path.read_bytes() if mask_path.exists() else None
         if mask_bytes is not None:
             mask_name = mask_path.name
@@ -176,7 +179,8 @@ def render() -> None:
                                 mask_name=mask_name,
                             )
                         except Exception:
-                            st.error("Le service d'inférence est indisponible.")
+                            st.error(
+                                "Le service d'inférence est indisponible.")
                     else:
                         if mask_bytes is None:
                             st.session_state.demo_prediction = {
@@ -214,36 +218,41 @@ def render() -> None:
     if prediction:
         st.subheader("Prédiction")
         show_validation = (canonical_class != "Inconnu")
-        
+
         if show_validation:
-            col_expected, col_predicted, col_confidence, col_chart = st.columns([1, 1, 1, 1])
+            col_expected, col_predicted, col_confidence, col_chart = st.columns([
+                                                                                1, 1, 1, 1])
             col_expected.metric("Label attendu", canonical_class)
         else:
             col_predicted, col_confidence, col_chart = st.columns([1, 1, 2])
-            
+
         if prediction.get("decision") == "review_required":
             col_predicted.metric("Décision", "Revue requise")
             if prediction.get("decision_reason") == "lung_mask_missing":
-                st.warning("Masque absent : revue humaine requise pour éviter une prédiction incohérente.")
+                st.warning(
+                    "Masque absent : revue humaine requise pour éviter une prédiction incohérente.")
             elif prediction.get("decision_reason") == "confidence_below_threshold":
                 st.warning("Confiance insuffisante : revue humaine requise.")
         else:
-            col_predicted.metric("Classe prédite", str(prediction["class_name"]))
+            col_predicted.metric(
+                "Classe prédite", str(prediction["class_name"]))
         confidence = prediction.get("confidence")
         col_confidence.metric(
             "Confiance", f"{float(confidence):.1%}" if confidence is not None else "N/A"
         )
-            
+
         with col_chart:
-            if prediction.get("probabilities"):
-                probabilities = pd.DataFrame(
-                    {"Probabilité": [float(p) for p in prediction["probabilities"]]},
+            probabilities = prediction.get("probabilities")
+            if probabilities is not None and len(probabilities) > 0:
+                probability_chart = pd.DataFrame(
+                    {"Probabilité": [float(p) for p in probabilities]},
                     index=CLASS_NAMES,
                 )
-                st.bar_chart(probabilities)
+                st.bar_chart(probability_chart)
             else:
-                st.caption("Probabilités indisponibles sans masque pulmonaire.")
-            
+                st.caption(
+                    "Probabilités indisponibles sans masque pulmonaire.")
+
         if show_validation:
             if prediction.get("decision") == "review_required":
                 pass
@@ -255,7 +264,7 @@ def render() -> None:
                 st.error(
                     f"Prédiction incorrecte — label attendu : {canonical_class}"
                 )
-                
+
         if api_url:
             st.caption("Grad-CAM n'est pas disponible pour le modèle XGBoost.")
         elif st.button("Interpréter avec Grad-CAM", type="primary", width="stretch"):
