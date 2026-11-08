@@ -114,6 +114,9 @@ dev = [
 experiments = [
     "mlflow>=2.18,<4.0",
 ]
+mlops = [
+    "dvc>=3.0,<4.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

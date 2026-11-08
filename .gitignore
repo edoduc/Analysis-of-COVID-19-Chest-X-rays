@@ -169,6 +169,7 @@ cython_debug/
 # data
 data/*
 !data/demo_samples
+!data/*.dvc
 
 # Models weights
 *clahe.pkl

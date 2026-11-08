@@ -39,8 +39,9 @@ images ne sont pas recopiées :
 ```bash
 uv run python -m src.create_split_dataset
 ```
-Le split test reste réservé à l'évaluation finale. Les données sous `data/` sont exclues
-de Git ; le versionnement DVC est prévu en phase 2.
+Le split test reste réservé à l'évaluation finale. Le contenu volumineux de `data/` reste
+exclu de Git ; ses manifestes DVC sont versionnables séparément. Aucun remote DVC n'est
+encore configuré, les objets restent donc dans le cache local `.dvc/cache`.
 
 ### Étape 3 : Extraction des caractéristiques ML
 Lit le manifeste commun à 299×299, comme les notebooks DS, et enregistre séparément les
@@ -49,6 +50,24 @@ ensuite en interne à 160×160, comme dans le notebook :
 ```bash
 uv run python -m src.feature_extraction_ml
 ```
+
+### Suivi DVC des données et des features
+DVC est fourni dans le groupe optionnel `mlops` du projet. Pour installer ce groupe dans
+le venv du projet :
+```bash
+uv sync --group mlops
+```
+
+Après la génération des artefacts, leurs manifestes DVC sont créés ainsi :
+```bash
+uv run --group mlops dvc add data/processed
+uv run --group mlops dvc add data/splits.csv
+uv run --group mlops dvc add data/features
+```
+Les manifestes `data/processed.dvc`, `data/splits.csv.dvc` et `data/features.dvc`, ainsi
+que les métadonnées DVC et les règles `.gitignore`, doivent être versionnés dans Git.
+DVC n'active pas l'auto-staging. Aucun stockage distant n'est configuré pour le moment :
+les données du cache `.dvc/cache` ne sont pas encore partageables entre machines.
 
 ### Étape 4 : Entraînement des modèles
 Les modèles classiques utilisent le split validation pour comparer les expériences et
