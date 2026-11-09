@@ -62,8 +62,34 @@ def test_predict_routes_low_confidence_to_review(monkeypatch):
     assert response.json()["candidate_class"] == "COVID"
 
 
+def test_predict_accepts_confidence_at_threshold(monkeypatch):
+    monkeypatch.setattr(
+        api_module,
+        "predict",
+        lambda _: {
+            "class_name": "COVID",
+            "class_index": 0,
+            "probabilities": np.array([0.5, 0.2, 0.2, 0.1]),
+            "confidence": api_module.CONFIDENCE_THRESHOLD,
+        },
+    )
+
+    response = client.post(
+        "/predict",
+        files={
+            "image": ("image.png", _png_bytes(), "image/png"),
+            "mask": ("mask.png", _png_bytes(), "image/png"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "prediction"
+    assert response.json()["class_name"] == "COVID"
+
+
 def test_predict_requires_mask_for_automatic_prediction(monkeypatch):
-    predict_mock = Mock(side_effect=AssertionError("Inference should not run without a mask."))
+    predict_mock = Mock(side_effect=AssertionError(
+        "Inference should not run without a mask."))
     monkeypatch.setattr(api_module, "predict", predict_mock)
 
     response = client.post(

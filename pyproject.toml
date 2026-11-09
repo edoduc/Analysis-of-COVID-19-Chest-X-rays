@@ -10,7 +10,7 @@ dependencies = [
     "asttokens==3.0.1",
     "attrs==26.1.0",
     "blinker==1.9.0",
-    "certifi==2026.5.20",
+    "certifi==2026.10.19",
     "charset-normalizer==3.4.7",
     "click==8.5.0",
     "colorama==0.4.6",
@@ -22,7 +22,7 @@ dependencies = [
     "et-xmlfile==2.0.0",
     "executing==2.2.1",
     "filelock==3.29.5",
-    "fastapi>=0.115,<1.0",
+    "fastapi>=0.115,<0.151",
     "fonttools==4.62.1",
     "fsspec==2026.6.0",
     "grad-cam==1.5.5",
@@ -116,6 +116,7 @@ experiments = [
 ]
 mlops = [
     "dvc[s3]>=3.0,<4.0",
+    "prefect>=3.9.1,<4.0",
 ]
 
 [tool.pytest.ini_options]

@@ -5,16 +5,22 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 
-from src.constants import CLASS_NAMES
+from src.constants import CLASS_NAMES, CONFIG
 from src.xgb_inference import get_xgb_model_path, predict
 from streamlit_app.core.preprocessing import run_pipeline
 
 
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 10 * 1024 * 1024))
 MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", 20_000_000))
-CONFIDENCE_THRESHOLD = float(os.environ.get("INFERENCE_CONFIDENCE_THRESHOLD", "0.5"))
+CONFIDENCE_THRESHOLD = float(
+    os.environ.get(
+        "INFERENCE_CONFIDENCE_THRESHOLD",
+        str(CONFIG.get("inference", {}).get("confidence_threshold", 0.5)),
+    )
+)
 MODEL_FAMILY = "xgboost"
-MODEL_VERSION = os.environ.get("XGBOOST_MODEL_VERSION") or Path(get_xgb_model_path()).stem
+MODEL_VERSION = os.environ.get(
+    "XGBOOST_MODEL_VERSION") or Path(get_xgb_model_path()).stem
 ALLOWED_IMAGE_FORMATS = {"PNG", "JPEG"}
 if not 0 <= CONFIDENCE_THRESHOLD <= 1:
     raise ValueError("INFERENCE_CONFIDENCE_THRESHOLD doit être entre 0 et 1.")
@@ -28,25 +34,32 @@ app = FastAPI(
 
 def _read_image(upload: UploadFile) -> bytes:
     if upload.content_type not in {"image/png", "image/jpeg"}:
-        raise HTTPException(status_code=415, detail="Format accepté : PNG ou JPEG.")
+        raise HTTPException(
+            status_code=415, detail="Format accepté : PNG ou JPEG.")
 
     content = upload.file.read(MAX_UPLOAD_BYTES + 1)
     if not content:
-        raise HTTPException(status_code=422, detail="Le fichier image est vide.")
+        raise HTTPException(
+            status_code=422, detail="Le fichier image est vide.")
     if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Fichier image trop volumineux.")
+        raise HTTPException(
+            status_code=413, detail="Fichier image trop volumineux.")
 
     try:
         with Image.open(BytesIO(content)) as image:
             if image.format not in ALLOWED_IMAGE_FORMATS:
-                raise HTTPException(status_code=415, detail="Format accepté : PNG ou JPEG.")
+                raise HTTPException(
+                    status_code=415, detail="Format accepté : PNG ou JPEG.")
             if image.width * image.height > MAX_IMAGE_PIXELS:
-                raise HTTPException(status_code=413, detail="Résolution image trop élevée.")
+                raise HTTPException(
+                    status_code=413, detail="Résolution image trop élevée.")
             image.verify()
     except (UnidentifiedImageError, Image.DecompressionBombError) as exc:
-        raise HTTPException(status_code=422, detail="Fichier image illisible.") from exc
+        raise HTTPException(
+            status_code=422, detail="Fichier image illisible.") from exc
     except OSError as exc:
-        raise HTTPException(status_code=422, detail="Fichier image illisible.") from exc
+        raise HTTPException(
+            status_code=422, detail="Fichier image illisible.") from exc
 
     return content
 
@@ -54,7 +67,8 @@ def _read_image(upload: UploadFile) -> bytes:
 @app.get("/health")
 def health() -> dict[str, str]:
     if not get_xgb_model_path().is_file():
-        raise HTTPException(status_code=503, detail="Poids du modèle indisponibles.")
+        raise HTTPException(
+            status_code=503, detail="Poids du modèle indisponibles.")
     return {
         "status": "ok",
         "model_family": MODEL_FAMILY,
@@ -90,9 +104,11 @@ def predict_image(
         processed = run_pipeline(image_bytes, mask_bytes)
         result = predict(processed["clahe"])
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail="Poids du modèle indisponibles.") from exc
+        raise HTTPException(
+            status_code=503, detail="Poids du modèle indisponibles.") from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail="Service d'inférence indisponible.") from exc
+        raise HTTPException(
+            status_code=503, detail="Service d'inférence indisponible.") from exc
 
     candidate_index = int(result["class_index"])
     confidence = float(result["confidence"])

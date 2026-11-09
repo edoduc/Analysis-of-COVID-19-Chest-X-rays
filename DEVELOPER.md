@@ -40,8 +40,8 @@ images ne sont pas recopiées :
 uv run python -m src.create_split_dataset
 ```
 Le split test reste réservé à l'évaluation finale. Le contenu volumineux de `data/` reste
-exclu de Git ; ses manifestes DVC sont versionnables séparément. Aucun remote DVC n'est
-encore configuré, les objets restent donc dans le cache local `.dvc/cache`.
+exclu de Git ; ses manifestes DVC sont versionnés séparément. Le remote par défaut
+`dagshub` est configuré dans `.dvc/config`.
 
 ### Étape 3 : Extraction des caractéristiques ML
 Lit le manifeste commun à 299×299, comme les notebooks DS, et enregistre séparément les
@@ -52,22 +52,50 @@ uv run python -m src.feature_extraction_ml
 ```
 
 ### Suivi DVC des données et des features
-DVC est fourni dans le groupe optionnel `mlops` du projet. Pour installer ce groupe dans
-le venv du projet :
+DVC avec son backend S3 et Prefect sont fournis dans le groupe optionnel `mlops` du projet.
+Pour installer ce groupe dans le venv du projet :
 ```bash
 uv sync --group mlops
 ```
 
-Après la génération des artefacts, leurs manifestes DVC sont créés ainsi :
+Après le téléchargement du dataset source et la génération des artefacts, leurs manifestes DVC sont créés ainsi :
 ```bash
+uv run --group mlops dvc add data/raw
 uv run --group mlops dvc add data/processed
 uv run --group mlops dvc add data/splits.csv
 uv run --group mlops dvc add data/features
 ```
-Les manifestes `data/processed.dvc`, `data/splits.csv.dvc` et `data/features.dvc`, ainsi
-que les métadonnées DVC et les règles `.gitignore`, doivent être versionnés dans Git.
-DVC n'active pas l'auto-staging. Aucun stockage distant n'est configuré pour le moment :
-les données du cache `.dvc/cache` ne sont pas encore partageables entre machines.
+Le manifeste `data/raw.dvc` fixe aussi la version exacte du dataset source utilisée par
+le prétraitement. Le dataset agrège des images de plusieurs sources; avant de pousser
+`data/raw.dvc` vers un remote, vérifier que les droits de toutes ces sources autorisent
+leur réhébergement. La fiche Kaggle indique un usage académique/non commercial et
+attribue les fichiers à leurs auteurs, sans établir à elle seule un droit général de
+redistribution.
+
+Les manifestes `data/raw.dvc`, `data/processed.dvc`, `data/splits.csv.dvc` et
+`data/features.dvc`, ainsi que les métadonnées DVC et les règles `.gitignore`, doivent
+être versionnés dans Git. DVC n'active pas l'auto-staging. Les credentials DagsHub sont
+locaux dans `.dvc/config.local` et ne doivent jamais être commités. Après avoir
+configuré le token sur chaque machine et vérifié les droits de redistribution du jeu
+brut, récupérer ou envoyer les objets DVC avec :
+```bash
+uv run --group mlops dvc pull -r dagshub data/raw.dvc data/processed.dvc data/splits.csv.dvc data/features.dvc
+uv run --group mlops dvc push -r dagshub data/raw.dvc data/processed.dvc data/splits.csv.dvc data/features.dvc
+```
+
+### Orchestration locale avec Prefect
+Le flow exécute les scripts existants de prétraitement, split, extraction, suivi DVC,
+entraînement MLflow et évaluation sur le test réservé. Il utilise le moteur local de
+Prefect, qui démarre automatiquement un serveur temporaire local pour le run ; aucun
+serveur permanent n'est à lancer. MLflow est fourni par le groupe `experiments` :
+```bash
+uv sync --group mlops --group experiments
+uv run --group mlops --group experiments python -m src.prefect_pipeline --model xgb --features stats lbp hog
+```
+Le modèle peut être `rf`, `svm` ou `xgb`. L'option `--push-data` envoie les artefacts
+après leur ajout DVC ; sans cette option, le flow ne pousse rien vers le remote. Le flow
+ne committe pas les manifestes modifiés : les vérifier et les versionner avec Git après
+exécution.
 
 ### Étape 4 : Entraînement des modèles
 Les modèles classiques utilisent le split validation pour comparer les expériences et
@@ -133,6 +161,26 @@ Une fois entraînés, évaluez les performances globales des modèles et génér
   ```bash
   uv run python -m src.evaluate --type deep --arch custom_cnn --filename cnn_from_scratch.pt
   ```
+
+## Critères d'acceptation de la phase 1
+
+- Le prétraitement et la création du manifeste s'exécutent de façon reproductible ; les
+  splits sont disjoints et stratifiés. Le split de test reste réservé à l'évaluation finale.
+- Un entraînement candidat termine et journalise dans MLflow les paramètres, le F1 macro,
+  le F1 pondéré et le rappel COVID sur validation.
+- Un candidat n'est retenu que si son F1 macro et son rappel COVID sur le même split de
+  validation ne régressent pas par rapport au modèle de référence. Ces métriques sont
+  rapportées sur le test uniquement après sélection du candidat. Cette comparaison est
+  manuelle en phase 1 ; son automatisation relève du pipeline CI des phases suivantes.
+- La suite de tests passe ; l'API expose `/health` et `/predict`, rejette les fichiers
+  invalides, exige le masque pour prédire et applique la règle de confiance ci-dessous.
+
+Le seuil technique initial est `0.5`, défini dans `config.json` et surchargeable par
+`INFERENCE_CONFIDENCE_THRESHOLD` : une confiance strictement inférieure impose une revue
+humaine ; une confiance égale ou supérieure autorise une prédiction si le masque est
+présent. Les probabilités ne sont pas calibrées. Ce seuil ne constitue donc ni une garantie
+d'incertitude ni un seuil clinique. Aucun seuil absolu de performance clinique n'est fixé
+sans validation par les responsables médicaux ; le prototype n'est pas destiné au diagnostic.
 
 ## API et tests de phase 1
 

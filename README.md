@@ -39,6 +39,9 @@ Le meilleur modèle est **ResNet-50**, qui sert de base à la démonstration.
 - **OpenCV**, **scikit-image**, **Pillow**, **NumPy**, **pandas** — traitement d'images et de données
 - **FastAPI** — API d'inférence
 - **Streamlit** — application de présentation et de démonstration
+- **DVC / DagsHub** — versionnement et partage des données et features
+- **Prefect** — orchestration locale du pipeline
+- **MLflow** — suivi des expériences d'entraînement
 
 ## Installation
 
@@ -119,9 +122,12 @@ Le masque est nécessaire pour une prédiction automatique cohérente avec l'ent
 Sans masque, l'API renvoie `review_required`. Avec un masque, une confiance sous le
 seuil configurable renvoie également `review_required`.
 
-Le seuil par défaut est `0.5` et les probabilités ne sont **pas calibrées** en phase 1 ;
-ce seuil est provisoire et ne constitue pas un seuil clinique. L'API est un démonstrateur
-pédagogique, pas un outil de diagnostic.
+Le seuil par défaut est `0.5`, défini dans `config.json` et surchargeable par
+`INFERENCE_CONFIDENCE_THRESHOLD`. Une confiance inférieure déclenche `review_required`;
+une confiance égale ou supérieure autorise la prédiction automatique si le masque est
+présent. Les probabilités ne sont **pas calibrées** en phase 1 : ce seuil est un réglage
+technique provisoire, pas un seuil clinique. L'API est un démonstrateur pédagogique, pas
+un outil de diagnostic.
 
 Pour choisir l'artefact XGBoost ou régler le seuil sous PowerShell :
 
