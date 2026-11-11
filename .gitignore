@@ -172,7 +172,7 @@ data/*
 
 # Models weights
 *clahe.pkl
-models/
+/models/
 
 # Temp
 ~*

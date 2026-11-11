@@ -1,106 +1,152 @@
-import os
+"""
+Dataset loading and splitting utilities.
+Supports memory-efficient streaming, deterministic train/test splits, and pre-split dataset loading.
+"""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+from typing import Generator, Sequence
+
 import cv2
 import numpy as np
-from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
+from src.logger import get_logger
+
+logger = get_logger(__name__)
+
+SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg")
+
+
 class DatasetLoader:
-    def __init__(self, data_dir, image_size=(224, 224)):
+    def __init__(
+        self,
+        data_dir: Path | str,
+        image_size: tuple[int, int] = (224, 224),
+    ) -> None:
         """
         Initializes the data loader.
-        :param data_dir: Path to the processed data folder
-        :param image_size: Tuple representing (width, height)
+        :param data_dir: Path to directory containing class folders of images
+        :param image_size: Target (width, height) tuple
         """
         self.data_dir = Path(data_dir)
         self.image_size = image_size
         self.label_encoder = LabelEncoder()
 
-    def load_dataset(self):
-        """
-        Scans the directory, loads images, and assigns labels.
-        Returns X (images) and y (encoded labels).
-        """
-        X = []
-        y_strings = []
+    def get_classes(self) -> list[str]:
+        """Returns sorted list of class subdirectories."""
+        if not self.data_dir.exists():
+            return []
+        return sorted([d.name for d in self.data_dir.iterdir() if d.is_dir()])
 
-        classes = sorted([d.name for d in self.data_dir.iterdir() if d.is_dir()])
-        print(f"Found classes: {classes}")
-
+    def iter_image_paths(self) -> Generator[tuple[Path, str], None, None]:
+        """
+        Deterministically yields (image_path, class_name) pairs without loading images into memory.
+        """
+        classes = self.get_classes()
         for cls in classes:
             class_dir = self.data_dir / cls
-            image_paths = [p for p in class_dir.iterdir() if p.suffix.lower() in ['.png', '.jpg', '.jpeg']]
-            
-            for img_path in image_paths:
-                img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
-                
-                if img is None:
-                    print(f"Warning: Could not read {img_path}")
-                    continue
-                
-                if img.shape != self.image_size:
-                    img = cv2.resize(img, self.image_size)
+            image_paths = sorted(
+                [p for p in class_dir.iterdir() if p.suffix.lower() in SUPPORTED_EXTENSIONS]
+            )
+            for path in image_paths:
+                yield path, cls
 
-                X.append(img)
-                y_strings.append(cls)
+    def read_single_image(self, path: Path | str) -> np.ndarray | None:
+        """Reads a single grayscale image and resizes it to target size."""
+        img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            logger.warning("Could not read image: %s", path)
+            return None
+        if img.shape != self.image_size:
+            img = cv2.resize(img, self.image_size)
+        return img
 
-        X = np.array(X)
-        
-        # Encode string labels to integers
-        y = self.label_encoder.fit_transform(y_strings)
-        
-        return X, y
-
-    def get_train_test_split(self, test_size=0.2, random_state=42):
+    def load_dataset(self) -> tuple[np.ndarray, np.ndarray]:
         """
-        Loads the dataset and returns a standardized train/test split.
+        Scans the directory, loads images into an array, and encodes labels.
+        Deterministic through alphabetical sorting.
         """
-        print("Loading images into memory...")
-        X, y = self.load_dataset()
-        
-        print(f"Total images loaded: {len(X)}")
-        
-        # Stratify=y ensures the same class proportions in train and test sets
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state, stratify=y
+        images = []
+        labels = []
+        classes = self.get_classes()
+        logger.info("Found classes: %s", classes)
+
+        for path, cls in self.iter_image_paths():
+            img = self.read_single_image(path)
+            if img is not None:
+                images.append(img)
+                labels.append(cls)
+
+        if not images:
+            logger.warning("No images loaded from %s", self.data_dir)
+            return np.empty((0, *self.image_size)), np.array([])
+
+        x = np.array(images)
+        y = self.label_encoder.fit_transform(labels)
+        return x, y
+
+    def get_train_test_split(
+        self, test_size: float = 0.2, random_state: int = 42
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, LabelEncoder]:
+        """
+        Loads the dataset and returns a standardized, stratified train/test split.
+        """
+        logger.info("Loading images into memory...")
+        x, y = self.load_dataset()
+        logger.info("Total images loaded: %d", len(x))
+
+        x_train, x_test, y_train, y_test = train_test_split(
+            x, y, test_size=test_size, random_state=random_state, stratify=y
         )
-        
-        print(f"Training set size: {len(X_train)}")
-        print(f"Testing set size: {len(X_test)}")
-        
-        return X_train, X_test, y_train, y_test, self.label_encoder
 
-    def split_and_save_dataset(self, output_base_dir, test_size=0.2, random_state=42):
+        logger.info("Training set size: %d", len(x_train))
+        logger.info("Testing set size: %d", len(x_test))
+
+        return x_train, x_test, y_train, y_test, self.label_encoder
+
+    def split_and_save_dataset(
+        self,
+        output_base_dir: Path | str,
+        test_size: float = 0.2,
+        random_state: int = 42,
+    ) -> None:
         """
-        Splits the pre-processed images by copying files into 'train' and 'test' subdirectories.
+        Splits pre-processed images by copying files into deterministic 'train' and 'test' subdirectories.
         """
-        import shutil
         output_base_dir = Path(output_base_dir)
-        
-        classes = sorted([d.name for d in self.data_dir.iterdir() if d.is_dir()])
-        print(f"Splitting dataset for classes: {classes}")
-        
+        classes = self.get_classes()
+        logger.info("Splitting dataset deterministically for classes: %s", classes)
+
         for cls in classes:
             class_dir = self.data_dir / cls
-            image_paths = sorted([p for p in class_dir.iterdir() if p.suffix.lower() in ['.png', '.jpg', '.jpeg']])
-            
+            image_paths = sorted(
+                [p for p in class_dir.iterdir() if p.suffix.lower() in SUPPORTED_EXTENSIONS]
+            )
+
             if not image_paths:
-                print(f"Warning: No images found for class {cls}")
+                logger.warning("No images found for class %s", cls)
                 continue
-                
-            # Perform split on paths (stratified by doing it per class)
+
             train_paths, test_paths = train_test_split(
                 image_paths, test_size=test_size, random_state=random_state
             )
-            
-            # Create destination dirs
+
             train_class_dir = output_base_dir / "train" / cls
             test_class_dir = output_base_dir / "test" / cls
             train_class_dir.mkdir(parents=True, exist_ok=True)
             test_class_dir.mkdir(parents=True, exist_ok=True)
-            
-            print(f"Copying {len(train_paths)} train and {len(test_paths)} test images for class '{cls}'...")
-            
+
+            logger.info(
+                "Copying %d train and %d test images for class '%s'...",
+                len(train_paths),
+                len(test_paths),
+                cls,
+            )
+
             for p in train_paths:
                 shutil.copy(p, train_class_dir / p.name)
             for p in test_paths:
