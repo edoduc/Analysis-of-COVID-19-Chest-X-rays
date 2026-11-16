@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import os
 from typing import Any, Sequence
 
 import joblib
@@ -128,6 +129,15 @@ def train(
 
     logger.info("Training matrix shape: %s", x_train.shape)
     logger.info("Testing matrix shape: %s", x_test.shape)
+
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+
+    if not tracking_uri:
+        raise ValueError("MLFLOW_TRACKING_URI is not configured")
+
+    mlflow.set_tracking_uri(tracking_uri)
+
+    logger.info("MLflow Tracking URI: %s", mlflow.get_tracking_uri())
 
     mlflow.set_experiment(exp_name)
     run_name = f"{model_name}_{'_'.join(features)}"
