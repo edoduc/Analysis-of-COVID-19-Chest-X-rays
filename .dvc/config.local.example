@@ -1,0 +1,4 @@
+# Les 2 clés sont identiques, ce sont des tokens à générer sur Dagshub
+['remote "dagshub"']
+    access_key_id = 
+    secret_access_key = 

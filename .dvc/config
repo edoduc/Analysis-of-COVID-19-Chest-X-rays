@@ -1,0 +1,5 @@
+[core]
+    remote = dagshub
+['remote "dagshub"']
+    url = s3://dvc
+    endpointurl = https://dagshub.com/edoduc/Analysis-of-COVID-19-Chest-X-rays.s3
