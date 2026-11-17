@@ -167,7 +167,12 @@ cython_debug/
 
 # Data folder
 # data
-data/*
+# data/*
+data/raw/
+data/processed/
+data/features/
+data/splits.csv
+!data/
 !data/demo_samples
 !data/*.dvc
 
