@@ -77,6 +77,48 @@ Vérifier l'installation :
 uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
+## Récupérer les données suivies par DVC
+
+Les fichiers `data/*.dvc` versionnés dans Git décrivent les données stockées sur
+DagsHub : `data/raw`, `data/processed`, `data/features` et `data/splits.csv`.
+Après avoir cloné le dépôt, exécutez ces étapes depuis sa racine.
+
+1. Installer DVC et les dépendances du projet :
+
+```bash
+uv sync --group dev
+```
+
+2. Créer le fichier local d'identifiants à partir du modèle :
+
+```powershell
+Copy-Item .dvc/config.local.example .dvc/config.local
+```
+
+Sous Linux ou macOS, utilisez plutôt :
+
+```bash
+cp .dvc/config.local.example .dvc/config.local
+```
+
+Ouvrez `.dvc/config.local` et renseignez `access_key_id` et `secret_access_key`
+avec les identifiants fournis par DagsHub pour le stockage du dépôt. Le modèle du
+projet indique que les deux valeurs utilisent le même token. Ce fichier est local,
+ignoré par Git et ne doit jamais être commité.
+
+3. Télécharger les données :
+
+```bash
+uv run dvc pull
+```
+
+4. Vérifier l'état local et la synchronisation avec le remote :
+
+```bash
+uv run dvc status
+uv run dvc status -c
+```
+
 ## Lancer l'application
 
 ```bash
