@@ -11,22 +11,62 @@ from typing import Sequence
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import ConfusionMatrixDisplay, accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import (
+    ConfusionMatrixDisplay,
+    accuracy_score,
+    classification_report,
+    precision_recall_fscore_support,
+)
 
 import torch
 import torch.nn as nn
 
-from src.config import DEFAULT_CLASSES, FEATURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR, PROJECT_ROOT, REPORTS_DIR, TEST_DATA_DIR
+from src.config import DEFAULT_CLASSES, FEATURES_DIR, MODELS_DIR, PROJECT_ROOT, REPORTS_DIR
+from src.data_loader import DatasetLoader
+from src.feature_extraction_ml import assert_features_match
 from src.logger import get_logger
-from src.models import CustomCNN, build_model
+from src.models import build_model
 
 logger = get_logger(__name__)
+
+# Same MLflow dataset name for every model (ML and DL): they are all evaluated
+# on the manifest's test split, so MLflow shows one shared dataset digest.
+DATASET_NAME = "covid_xray_test"
+
+
+def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+    """Test metrics logged identically for every model family."""
+    p, r, f1, _ = precision_recall_fscore_support(y_true, y_pred, average="macro", zero_division=0)
+    _, _, f1_w, _ = precision_recall_fscore_support(y_true, y_pred, average="weighted", zero_division=0)
+    return {
+        "test_accuracy": float(accuracy_score(y_true, y_pred)),
+        "test_precision_macro": float(p),
+        "test_recall_macro": float(r),
+        "test_f1_macro": float(f1),
+        "test_f1_weighted": float(f1_w),
+    }
+
+
+def log_test_dataset(loader: DatasetLoader, fingerprint: dict[str, str]) -> None:
+    """
+    Logs the frozen test split to the active MLflow run: lineage tags plus an
+    `mlflow.data` input built from the manifest rows only (no predictions), so
+    the dataset digest is identical across all models.
+    """
+    import mlflow
+    import mlflow.data
+
+    mlflow.set_tags(fingerprint)
+    test_rows = loader.split_frame("test")[["class_name", "image_path"]]
+    dataset = mlflow.data.from_pandas(test_rows, name=DATASET_NAME, targets="class_name")
+    mlflow.log_input(dataset, context="evaluation")
 
 
 def evaluate_ml_model(
     model_path: Path, features_dir: Path, feature_list: Sequence[str]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Loads a Scikit-Learn model or Pipeline and evaluates it on test feature arrays."""
+    assert_features_match(features_dir, DatasetLoader(), ["test"])
     logger.info("Loading ML model artifact: %s", model_path.name)
     model = joblib.load(model_path)
 
@@ -67,20 +107,33 @@ def load_pytorch_checkpoint(model: nn.Module, model_path: Path, device: torch.de
         return model.to("cpu").eval()
 
 
+def eval_transform_for(arch: str, img_size: tuple[int, int] = (224, 224)):
+    """Evaluation transform matching how each architecture was trained."""
+    from torchvision import transforms
+
+    steps = [
+        transforms.Resize(img_size),
+        transforms.Grayscale(num_output_channels=3),
+        transforms.ToTensor(),
+    ]
+    if arch.lower() != "custom_cnn":
+        steps.append(transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
+    return transforms.Compose(steps)
+
+
 def evaluate_deep_model(
     model_path: Path,
-    data_dir: Path | None = None,
     arch: str = "resnet50",
     img_size: tuple[int, int] = (224, 224),
     batch_size: int = 32,
     device_name: str | None = None,
+    loader: DatasetLoader | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Evaluates a PyTorch model on the frozen test dataset (or fallback validation split).
+    Evaluates a PyTorch model on the frozen test split of the manifest.
+    There is deliberately no fallback: if the manifest is missing, this fails.
     """
-    from torch.utils.data import DataLoader, random_split
-    from torchvision import transforms
-    from torchvision.datasets import ImageFolder
+    from torch.utils.data import DataLoader
 
     logger.info("Evaluating Deep Learning model (%s): %s", arch, model_path.name)
     if device_name:
@@ -89,53 +142,13 @@ def evaluate_deep_model(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("Requested device: %s", device)
 
-    # 1. Instantiate and load weights
     model = build_model(arch, num_classes=len(DEFAULT_CLASSES))
     model = load_pytorch_checkpoint(model, model_path, device)
     actual_device = next(model.parameters()).device
     logger.info("Active model compute device: %s", actual_device)
 
-    # 2. Setup transforms
-    if arch.lower() == "custom_cnn":
-        eval_transform = transforms.Compose(
-            [
-                transforms.Resize(img_size),
-                transforms.Grayscale(num_output_channels=3),
-                transforms.ToTensor(),
-            ]
-        )
-    else:
-        eval_transform = transforms.Compose(
-            [
-                transforms.Resize(img_size),
-                transforms.Grayscale(num_output_channels=3),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                ),
-            ]
-        )
-
-    # 3. Determine evaluation dataset source
-    test_path = TEST_DATA_DIR if data_dir is None else Path(data_dir)
-
-    if test_path.exists() and any(test_path.iterdir()):
-        logger.info("Evaluating directly on frozen test dataset: %s", test_path)
-        eval_dataset = ImageFolder(root=str(test_path), transform=eval_transform)
-    else:
-        fallback_dir = PROCESSED_DATA_DIR
-        logger.warning(
-            "Test directory '%s' not found. Falling back to 20%% split on '%s'.",
-            test_path,
-            fallback_dir,
-        )
-        full_dataset = ImageFolder(root=str(fallback_dir), transform=eval_transform)
-        generator = torch.Generator().manual_seed(42)
-        val_size = int(0.2 * len(full_dataset))
-        train_size = len(full_dataset) - val_size
-        _, eval_dataset = random_split(
-            full_dataset, [train_size, val_size], generator=generator
-        )
+    loader = loader or DatasetLoader()
+    eval_dataset = loader.torch_dataset("test", transform=eval_transform_for(arch, img_size))
 
     val_loader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=False)
 
@@ -233,12 +246,6 @@ def main() -> None:
         help="Features used (only for ML models)",
     )
     parser.add_argument(
-        "--data-dir",
-        type=str,
-        default=None,
-        help="Custom test dataset directory (for deep models)",
-    )
-    parser.add_argument(
         "--device",
         type=str,
         default=None,
@@ -248,18 +255,13 @@ def main() -> None:
     args = parser.parse_args()
 
     model_path = resolve_model_path(args.filename)
-    classes_file = FEATURES_DIR / "classes.npy"
-    if classes_file.exists():
-        class_names = list(np.load(classes_file))
-    else:
-        class_names = DEFAULT_CLASSES
+    class_names = list(DEFAULT_CLASSES)
 
     if args.type == "ml":
         y_test, y_pred, _ = evaluate_ml_model(model_path, FEATURES_DIR, args.features)
     else:
-        data_dir = Path(args.data_dir) if args.data_dir else None
         y_test, y_pred, _ = evaluate_deep_model(
-            model_path, data_dir=data_dir, arch=args.arch, device_name=args.device
+            model_path, arch=args.arch, device_name=args.device
         )
 
     acc = accuracy_score(y_test, y_pred)

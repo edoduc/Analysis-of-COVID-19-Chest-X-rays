@@ -14,13 +14,15 @@ import mlflow
 import mlflow.sklearn
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
 
-from src.config import FEATURES_DIR, MODELS_DIR, PROJECT_ROOT, load_config
+from src.config import FEATURES_DIR, MODELS_DIR, load_config
+from src.data_loader import DatasetLoader
+from src.evaluate import compute_metrics, log_test_dataset
+from src.feature_extraction_ml import assert_features_match
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -123,6 +125,11 @@ def train(
     models_dir.mkdir(parents=True, exist_ok=True)
     features_dir = FEATURES_DIR
 
+    # Refuse stale features: they must come from the DVC-committed split manifest.
+    loader = DatasetLoader()
+    fingerprint = loader.fingerprint()
+    assert_features_match(features_dir, loader, ("train", "test"))
+
     logger.info("Preparing to train %s with features: %s", model_name.upper(), features)
     x_train, y_train = load_and_combine_features(features_dir, "train", features)
     x_test, y_test = load_and_combine_features(features_dir, "test", features)
@@ -147,6 +154,7 @@ def train(
         mlflow.log_param("features_used", list(features))
         mlflow.log_param("feature_vector_size", x_train.shape[1])
         mlflow.log_param("use_scaler", use_scaler)
+        log_test_dataset(loader, fingerprint)
 
         spec_config = models_config.get(model_name, {})
         for param_name, param_val in spec_config.items():
@@ -161,17 +169,9 @@ def train(
 
         logger.info("Predicting on test set...")
         y_pred = pipeline.predict(x_test)
-        acc = accuracy_score(y_test, y_pred)
-        f1_macro = f1_score(y_test, y_pred, average="macro")
-        f1_weighted = f1_score(y_test, y_pred, average="weighted")
-
-        mlflow.log_metric("test_accuracy", acc)
-        mlflow.log_metric("test_f1_macro", f1_macro)
-        mlflow.log_metric("test_f1_weighted", f1_weighted)
-
-        logger.info("Test Accuracy: %.4f", acc)
-        logger.info("Test F1 (Weighted): %.4f", f1_weighted)
-        logger.info("Test F1 (Macro): %.4f", f1_macro)
+        metrics = compute_metrics(y_test, y_pred)
+        mlflow.log_metrics(metrics)
+        logger.info("Test metrics: %s", {k: round(v, 4) for k, v in metrics.items()})
 
         # Save pipeline model locally and to MLflow
         model_filename = f"{model_name}_{'_'.join(features)}.joblib"

@@ -1,153 +1,133 @@
 """
-Dataset loading and splitting utilities.
-Supports memory-efficient streaming, deterministic train/test splits, and pre-split dataset loading.
+Single entry point for dataset access.
+
+The train / validation / test partition is defined ONLY by `data/splits.csv`
+(columns: split, class_name, image_path), versioned with DVC. Paths are
+relative to `data/processed`. Every model (ML and DL) reads its data through
+`DatasetLoader`, so all of them are trained and evaluated on the same split.
 """
 
 from __future__ import annotations
 
-import shutil
+import hashlib
 from pathlib import Path
-from typing import Generator, Sequence
+from typing import TYPE_CHECKING, Iterable
 
 import cv2
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+import pandas as pd
+import yaml
 
-from src.logger import get_logger
+from src.config import DEFAULT_CLASSES, PROCESSED_DATA_DIR, SPLITS_FILE
 
-logger = get_logger(__name__)
+if TYPE_CHECKING:
+    from torch.utils.data import Subset
 
-SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg")
+SPLITS = ("train", "validation", "test")
+
+
+class ManifestError(ValueError):
+    """splits.csv is missing, invalid, or differs from its DVC-committed version."""
+
+
+def md5_of(path: Path) -> str:
+    h = hashlib.md5()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def read_dvc_md5(path: Path) -> str | None:
+    """md5 recorded by DVC in '<path>.dvc', or None if the file is not tracked."""
+    dvc_file = path.with_name(path.name + ".dvc")
+    if not dvc_file.exists():
+        return None
+    return yaml.safe_load(dvc_file.read_text(encoding="utf-8"))["outs"][0]["md5"]
 
 
 class DatasetLoader:
     def __init__(
         self,
-        data_dir: Path | str,
-        image_size: tuple[int, int] = (224, 224),
+        processed_dir: Path | str = PROCESSED_DATA_DIR,
+        manifest_path: Path | str = SPLITS_FILE,
+        image_size: tuple[int, int] | None = None,
     ) -> None:
-        """
-        Initializes the data loader.
-        :param data_dir: Path to directory containing class folders of images
-        :param image_size: Target (width, height) tuple
-        """
-        self.data_dir = Path(data_dir)
+        """image_size=None keeps the native resolution (299x299 after preprocessing)."""
+        self.processed_dir = Path(processed_dir)
+        self.manifest_path = Path(manifest_path)
         self.image_size = image_size
-        self.label_encoder = LabelEncoder()
+        self._manifest: pd.DataFrame | None = None
 
-    def get_classes(self) -> list[str]:
-        """Returns sorted list of class subdirectories."""
-        if not self.data_dir.exists():
-            return []
-        return sorted([d.name for d in self.data_dir.iterdir() if d.is_dir()])
+    def load_manifest(self) -> pd.DataFrame:
+        """Reads and checks splits.csv once: valid splits/classes, no image twice, files present."""
+        if self._manifest is not None:
+            return self._manifest
+        if not self.manifest_path.exists():
+            raise ManifestError(f"{self.manifest_path} not found. Run `uv run dvc pull data/splits.csv.dvc`.")
 
-    def iter_image_paths(self) -> Generator[tuple[Path, str], None, None]:
-        """
-        Deterministically yields (image_path, class_name) pairs without loading images into memory.
-        """
-        classes = self.get_classes()
-        for cls in classes:
-            class_dir = self.data_dir / cls
-            image_paths = sorted(
-                [p for p in class_dir.iterdir() if p.suffix.lower() in SUPPORTED_EXTENSIONS]
-            )
-            for path in image_paths:
-                yield path, cls
+        df = pd.read_csv(self.manifest_path, dtype=str)
+        if not set(df["split"]) <= set(SPLITS):
+            raise ManifestError(f"Unknown split values: {set(df['split']) - set(SPLITS)}")
+        if not set(df["class_name"]) <= set(DEFAULT_CLASSES):
+            raise ManifestError(f"Unknown classes: {set(df['class_name']) - set(DEFAULT_CLASSES)}")
+        if df["image_path"].duplicated().any():
+            raise ManifestError("An image is listed more than once in splits.csv (data leakage).")
+        missing = [p for p in df["image_path"] if not (self.processed_dir / p).is_file()]
+        if missing:
+            raise ManifestError(f"{len(missing)} images missing from {self.processed_dir}, e.g. {missing[:3]}")
 
-    def read_single_image(self, path: Path | str) -> np.ndarray | None:
-        """Reads a single grayscale image and resizes it to target size."""
-        img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            logger.warning("Could not read image: %s", path)
-            return None
-        if img.shape != self.image_size:
-            img = cv2.resize(img, self.image_size)
-        return img
+        self._manifest = df.sort_values("image_path", ignore_index=True)
+        return self._manifest
 
-    def load_dataset(self) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Scans the directory, loads images into an array, and encodes labels.
-        Deterministic through alphabetical sorting.
-        """
+    def split_frame(self, splits: str | Iterable[str]) -> pd.DataFrame:
+        """Rows of the requested split(s), in a deterministic order."""
+        wanted = [splits] if isinstance(splits, str) else list(splits)
+        df = self.load_manifest()
+        return df[df["split"].isin(wanted)].reset_index(drop=True)
+
+    def labels(self, splits: str | Iterable[str]) -> np.ndarray:
+        """Labels (DEFAULT_CLASSES order) of the requested split(s), in `split_frame` order."""
+        return self.split_frame(splits)["class_name"].map(DEFAULT_CLASSES.index).to_numpy(dtype=np.int64)
+
+    def load_split(self, splits: str | Iterable[str]) -> tuple[np.ndarray, np.ndarray]:
+        """Grayscale images (resized if `image_size` is set) and their labels (for ML)."""
         images = []
-        labels = []
-        classes = self.get_classes()
-        logger.info("Found classes: %s", classes)
+        for rel_path in self.split_frame(splits)["image_path"]:
+            img = cv2.imread(str(self.processed_dir / rel_path), cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                raise ManifestError(f"Unreadable image: {rel_path}")
+            images.append(cv2.resize(img, self.image_size) if self.image_size else img)
+        return np.stack(images), self.labels(splits)
 
-        for path, cls in self.iter_image_paths():
-            img = self.read_single_image(path)
-            if img is not None:
-                images.append(img)
-                labels.append(cls)
+    def torch_dataset(self, splits: str | Iterable[str], transform=None) -> "Subset":
+        """ImageFolder over data/processed restricted to the requested split(s) (for DL)."""
+        from torch.utils.data import Subset
+        from torchvision.datasets import ImageFolder
 
-        if not images:
-            logger.warning("No images loaded from %s", self.data_dir)
-            return np.empty((0, *self.image_size)), np.array([])
+        folder = ImageFolder(root=str(self.processed_dir), transform=transform)
+        if folder.classes != DEFAULT_CLASSES:
+            raise ManifestError(f"Class order mismatch: {folder.classes} vs {DEFAULT_CLASSES}")
+        index = {
+            Path(path).relative_to(self.processed_dir).as_posix(): i
+            for i, (path, _) in enumerate(folder.samples)
+        }
+        return Subset(folder, [index[p] for p in self.split_frame(splits)["image_path"]])
 
-        x = np.array(images)
-        y = self.label_encoder.fit_transform(labels)
-        return x, y
-
-    def get_train_test_split(
-        self, test_size: float = 0.2, random_state: int = 42
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, LabelEncoder]:
+    def fingerprint(self) -> dict[str, str]:
         """
-        Loads the dataset and returns a standardized, stratified train/test split.
+        Data version to log with every run. Raises if splits.csv differs from the
+        md5 committed in data/splits.csv.dvc (restore it with `dvc checkout`).
         """
-        logger.info("Loading images into memory...")
-        x, y = self.load_dataset()
-        logger.info("Total images loaded: %d", len(x))
-
-        x_train, x_test, y_train, y_test = train_test_split(
-            x, y, test_size=test_size, random_state=random_state, stratify=y
-        )
-
-        logger.info("Training set size: %d", len(x_train))
-        logger.info("Testing set size: %d", len(x_test))
-
-        return x_train, x_test, y_train, y_test, self.label_encoder
-
-    def split_and_save_dataset(
-        self,
-        output_base_dir: Path | str,
-        test_size: float = 0.2,
-        random_state: int = 42,
-    ) -> None:
-        """
-        Splits pre-processed images by copying files into deterministic 'train' and 'test' subdirectories.
-        """
-        output_base_dir = Path(output_base_dir)
-        classes = self.get_classes()
-        logger.info("Splitting dataset deterministically for classes: %s", classes)
-
-        for cls in classes:
-            class_dir = self.data_dir / cls
-            image_paths = sorted(
-                [p for p in class_dir.iterdir() if p.suffix.lower() in SUPPORTED_EXTENSIONS]
+        self.load_manifest()
+        local_md5 = md5_of(self.manifest_path)
+        dvc_md5 = read_dvc_md5(self.manifest_path)
+        if local_md5 != dvc_md5:
+            raise ManifestError(
+                f"splits.csv (md5 {local_md5}) differs from data/splits.csv.dvc ({dvc_md5}). "
+                "Run `uv run dvc checkout data/splits.csv.dvc`."
             )
-
-            if not image_paths:
-                logger.warning("No images found for class %s", cls)
-                continue
-
-            train_paths, test_paths = train_test_split(
-                image_paths, test_size=test_size, random_state=random_state
-            )
-
-            train_class_dir = output_base_dir / "train" / cls
-            test_class_dir = output_base_dir / "test" / cls
-            train_class_dir.mkdir(parents=True, exist_ok=True)
-            test_class_dir.mkdir(parents=True, exist_ok=True)
-
-            logger.info(
-                "Copying %d train and %d test images for class '%s'...",
-                len(train_paths),
-                len(test_paths),
-                cls,
-            )
-
-            for p in train_paths:
-                shutil.copy(p, train_class_dir / p.name)
-            for p in test_paths:
-                shutil.copy(p, test_class_dir / p.name)
+        return {
+            "split_manifest_md5": local_md5,
+            "processed_data_md5": read_dvc_md5(self.processed_dir) or "unknown",
+        }

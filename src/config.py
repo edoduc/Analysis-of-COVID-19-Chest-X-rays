@@ -20,8 +20,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw" / "COVID-19_Radiography_Dataset"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
-TRAIN_DATA_DIR = DATA_DIR / "train"
-TEST_DATA_DIR = DATA_DIR / "test"
+# Single source of truth for train/val/test membership (DVC-tracked).
+# Read it only through src.data_loader.DatasetLoader.
+SPLITS_FILE = DATA_DIR / "splits.csv"
 FEATURES_DIR = DATA_DIR / "features"
 MODELS_DIR = PROJECT_ROOT / "models" / "saved_models"
 REPORTS_DIR = PROJECT_ROOT / "reports"

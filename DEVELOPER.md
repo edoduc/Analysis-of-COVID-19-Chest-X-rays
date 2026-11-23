@@ -23,17 +23,29 @@ Applique le pipeline de masquage, recadrage, ajustement du contraste (CLAHE) et 
 python src/preprocessing.py
 ```
 
-### Étape 2 : Séparation stratifiée du dataset
-Sépare les images traitées en répertoires `train` et `test` (80% / 20% stratifié) :
+### Étape 2 : Split figé (`data/splits.csv`)
+Le découpage est défini **uniquement** par `data/splits.csv` (colonnes
+`split,class_name,image_path`, chemins relatifs à `data/processed`), versionné avec DVC :
+train 70 % / validation 10 % / test 20 % (le test set est celui du ResNet-50).
 ```bash
-python src/create_split_dataset.py
+uv run dvc pull data/splits.csv.dvc
 ```
+- Tout accès aux données passe par `src.data_loader.DatasetLoader`
+  (`load_split` pour le ML, `torch_dataset` pour le DL). Ne jamais re-splitter ailleurs.
+- `DatasetLoader.fingerprint()` refuse de tourner si `splits.csv` ne correspond pas à
+  `data/splits.csv.dvc` ; chaque run MLflow porte le tag `split_manifest_md5`.
 
 ### Étape 3 : Extraction des caractéristiques ML
-Calcule et enregistre de manière indépendante les matrices de caractéristiques statistiques, LBP et HOG :
+Les features sont versionnées avec DVC : `uv run dvc pull data/features.dvc` suffit.
+Pour les recalculer (stats / LBP / HOG, en 299×299 natif, une matrice par split :
+`X_train_*`, `X_validation_*`, `X_test_*`) :
 ```bash
-python src/feature_extraction_ml.py
+uv run python -m src.feature_extraction_ml
+uv run dvc add data/features
 ```
+`train_ml.py` et `evaluate.py` vérifient que les labels `y_<split>.npy` correspondent
+ligne à ligne au split de `splits.csv`, et refusent sinon. Entraînement sur `train`,
+réglage sur `validation`, score final sur `test`.
 
 ### Étape 4 : Entraînement des modèles
 Entraînez un modèle spécifique sur les caractéristiques de votre choix :
@@ -70,7 +82,41 @@ Une fois entraînés, évaluez les performances globales des modèles et génér
   python src/evaluate.py --type deep --filename resnet50_best.pth
   ```
 
+Les modèles deep sont toujours évalués sur le split `test` du manifeste (aucun repli
+sur un split aléatoire).
+
 * **Modèle Deep Learning Custom CNN (from scratch) :**
   ```bash
   uv run python src/evaluate.py --type deep --arch custom_cnn --filename cnn_from_scratch.pt
   ```
+
+
+---
+
+## 4. Entraîner un modèle Deep Learning (Colab) sur le split figé
+
+Entraînez sur `train`, faites l'early stopping sur `validation`, n'utilisez jamais `test`.
+Dans Colab, après avoir copié `data/processed` et `data/splits.csv` :
+
+```python
+import pandas as pd
+from pathlib import Path
+from torch.utils.data import Subset
+from torchvision.datasets import ImageFolder
+
+PROCESSED = Path("data/processed")
+splits = pd.read_csv("data/splits.csv")
+
+def split_dataset(split, transform):
+    folder = ImageFolder(PROCESSED, transform=transform)
+    index = {Path(p).relative_to(PROCESSED).as_posix(): i for i, (p, _) in enumerate(folder.samples)}
+    paths = sorted(splits.loc[splits["split"] == split, "image_path"])
+    return Subset(folder, [index[p] for p in paths])
+
+train_ds = split_dataset("train", train_transforms)
+val_ds = split_dataset("validation", eval_transforms)
+```
+
+Dans le dépôt : `DatasetLoader().torch_dataset("train", transform)`. Le custom CNN a été
+entraîné sur un ancien split : il est retiré de `src/register_deep_models.py` tant qu'il
+n'est pas ré-entraîné ainsi.

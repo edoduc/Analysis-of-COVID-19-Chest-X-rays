@@ -166,12 +166,17 @@ cython_debug/
 .vscode/
 
 # Data folder
-# data
-# data/*
+# Do NOT use `data/*`: DVC skips git-ignored directories and would no longer
+# find data/*.dvc ("There are no data or pipelines tracked"). List paths explicitly.
+# DVC-tracked outputs:
 data/raw/
 data/processed/
 data/features/
 data/splits.csv
+# Local-only artefacts:
+data/features_old/
+data/padded/
+data/dataset_pixel_statistics.csv
 !data/
 !data/demo_samples
 !data/*.dvc
@@ -179,6 +184,11 @@ data/splits.csv
 # Models weights
 *clahe.pkl
 /models/
+
+# Mlflow
+mlruns/
+mlartifacts/
+MLproject
 
 # Temp
 ~*
