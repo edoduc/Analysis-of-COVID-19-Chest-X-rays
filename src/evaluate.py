@@ -66,7 +66,7 @@ def evaluate_ml_model(
     model_path: Path, features_dir: Path, feature_list: Sequence[str]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Loads a Scikit-Learn model or Pipeline and evaluates it on test feature arrays."""
-    assert_features_match(features_dir, DatasetLoader().fingerprint())
+    assert_features_match(features_dir, DatasetLoader(), ["test"])
     logger.info("Loading ML model artifact: %s", model_path.name)
     model = joblib.load(model_path)
 

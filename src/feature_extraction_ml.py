@@ -6,7 +6,6 @@ Extracts statistical ROI features, Local Binary Patterns (LBP), and Histogram of
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -18,26 +17,23 @@ from skimage.measure import shannon_entropy
 from tqdm import tqdm
 
 from src.config import DEFAULT_CLASSES, FEATURES_DIR, load_config
-from src.data_loader import DatasetLoader, ManifestError
+from src.data_loader import SPLITS, DatasetLoader, ManifestError
 from src.logger import get_logger
 
 logger = get_logger(__name__)
 
-FEATURES_META_FILE = "meta.json"
-# Classical ML has no early stopping, so it trains on train+val and is scored on test.
-ML_TRAIN_SPLITS = ("train", "validation")
-ML_TEST_SPLIT = "test"
-
-
-def assert_features_match(features_dir: Path, fingerprint: dict[str, str]) -> None:
-    """Refuse feature matrices extracted from another version of splits.csv."""
-    meta_path = Path(features_dir) / FEATURES_META_FILE
-    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
-    if meta.get("fingerprint") != fingerprint:
-        raise ManifestError(
-            f"Features in {features_dir} were not extracted from the current splits.csv. "
-            "Re-run `uv run python -m src.feature_extraction_ml`."
-        )
+def assert_features_match(features_dir: Path, loader: DatasetLoader, splits: Sequence[str]) -> None:
+    """
+    Refuse feature matrices that don't belong to the current splits.csv: the saved
+    labels must equal, row by row, the labels the loader gives for each split.
+    """
+    for split in splits:
+        y_path = Path(features_dir) / f"y_{split}.npy"
+        if not y_path.exists() or not np.array_equal(np.load(y_path), loader.labels(split)):
+            raise ManifestError(
+                f"{y_path} does not match the '{split}' split of splits.csv. "
+                "Re-run `uv run python -m src.feature_extraction_ml` (or `dvc pull data/features.dvc`)."
+            )
 
 
 def extract_stat_features(image: np.ndarray) -> np.ndarray:
@@ -187,10 +183,7 @@ def run_feature_extraction(
     config_path: Path | str | None = None,
     loader: DatasetLoader | None = None,
 ) -> None:
-    """
-    Extracts features for the manifest splits: train+val -> 'train' matrices,
-    test -> 'test' matrices. Writes meta.json with the data fingerprint.
-    """
+    """Extracts stats / LBP / HOG matrices for each split of splits.csv (train, validation, test)."""
     config = load_config(config_path)
     fe_config = config.get("feature_extraction", {})
     lbp_config = fe_config.get("lbp", {})
@@ -198,31 +191,16 @@ def run_feature_extraction(
 
     out_path = Path(output_dir) if output_dir else FEATURES_DIR
     out_path.mkdir(parents=True, exist_ok=True)
-    # Invalidate first, so a crash mid-extraction can't leave old meta next to new matrices.
-    (out_path / FEATURES_META_FILE).unlink(missing_ok=True)
 
     loader = loader or DatasetLoader()
-    fingerprint = loader.fingerprint()
-    logger.info("Data fingerprint: %s", fingerprint)
-
-    x_train, y_train = loader.load_split(ML_TRAIN_SPLITS)
-    x_test, y_test = loader.load_split(ML_TEST_SPLIT)
-
+    logger.info("Data fingerprint: %s", loader.fingerprint())
     np.save(out_path / "classes.npy", np.array(DEFAULT_CLASSES))
 
-    train_stats, train_lbp, train_hog = extract_features_from_images(
-        x_train, "train", lbp_config, hog_config
-    )
-    save_features(out_path, "train", train_stats, train_lbp, train_hog, y_train)
+    for split in SPLITS:
+        images, labels = loader.load_split(split)
+        stats, lbp, hog_feats = extract_features_from_images(images, split, lbp_config, hog_config)
+        save_features(out_path, split, stats, lbp, hog_feats, labels)
 
-    test_stats, test_lbp, test_hog = extract_features_from_images(
-        x_test, "test", lbp_config, hog_config
-    )
-    save_features(out_path, "test", test_stats, test_lbp, test_hog, y_test)
-
-    # Written last: certifies a complete extraction for this split version.
-    meta = {"fingerprint": fingerprint, "train_splits": list(ML_TRAIN_SPLITS), "feature_extraction": fe_config}
-    (out_path / FEATURES_META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
     logger.info("All feature extraction completed successfully!")
 
 

@@ -128,7 +128,7 @@ def train(
     # Refuse stale features: they must come from the DVC-committed split manifest.
     loader = DatasetLoader()
     fingerprint = loader.fingerprint()
-    assert_features_match(features_dir, fingerprint)
+    assert_features_match(features_dir, loader, ("train", "test"))
 
     logger.info("Preparing to train %s with features: %s", model_name.upper(), features)
     x_train, y_train = load_and_combine_features(features_dir, "train", features)

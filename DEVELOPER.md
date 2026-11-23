@@ -36,14 +36,16 @@ uv run dvc pull data/splits.csv.dvc
   `data/splits.csv.dvc` ; chaque run MLflow porte le tag `split_manifest_md5`.
 
 ### Étape 3 : Extraction des caractéristiques ML
-Calcule les matrices stats / LBP / HOG : `train` = splits train+val du manifeste
-(pas d'early stopping en ML), `test` = split test. Écrit `data/features/meta.json`
-avec l'empreinte des données ; `train_ml.py` et `evaluate.py` refusent des features
-extraites d'une autre version du split.
+Les features sont versionnées avec DVC : `uv run dvc pull data/features.dvc` suffit.
+Pour les recalculer (stats / LBP / HOG, en 299×299 natif, une matrice par split :
+`X_train_*`, `X_validation_*`, `X_test_*`) :
 ```bash
 uv run python -m src.feature_extraction_ml
 uv run dvc add data/features
 ```
+`train_ml.py` et `evaluate.py` vérifient que les labels `y_<split>.npy` correspondent
+ligne à ligne au split de `splits.csv`, et refusent sinon. Entraînement sur `train`,
+réglage sur `validation`, score final sur `test`.
 
 ### Étape 4 : Entraînement des modèles
 Entraînez un modèle spécifique sur les caractéristiques de votre choix :

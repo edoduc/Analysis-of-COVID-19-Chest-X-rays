@@ -72,3 +72,14 @@ def test_fingerprint_requires_the_dvc_committed_manifest(loader: DatasetLoader):
     df.to_csv(loader.manifest_path, index=False)
     with pytest.raises(ManifestError, match="differs"):
         DatasetLoader(loader.processed_dir, loader.manifest_path).fingerprint()
+
+
+def test_features_must_match_the_split(loader: DatasetLoader, tmp_path: Path):
+    from src.feature_extraction_ml import assert_features_match
+
+    np.save(tmp_path / "y_test.npy", loader.labels("test"))
+    assert_features_match(tmp_path, loader, ["test"])
+
+    np.save(tmp_path / "y_test.npy", loader.labels("test")[::-1])  # same labels, wrong rows
+    with pytest.raises(ManifestError, match="does not match"):
+        assert_features_match(tmp_path, loader, ["test"])

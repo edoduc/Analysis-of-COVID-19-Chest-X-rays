@@ -51,8 +51,9 @@ class DatasetLoader:
         self,
         processed_dir: Path | str = PROCESSED_DATA_DIR,
         manifest_path: Path | str = SPLITS_FILE,
-        image_size: tuple[int, int] = (224, 224),
+        image_size: tuple[int, int] | None = None,
     ) -> None:
+        """image_size=None keeps the native resolution (299x299 after preprocessing)."""
         self.processed_dir = Path(processed_dir)
         self.manifest_path = Path(manifest_path)
         self.image_size = image_size
@@ -85,17 +86,19 @@ class DatasetLoader:
         df = self.load_manifest()
         return df[df["split"].isin(wanted)].reset_index(drop=True)
 
+    def labels(self, splits: str | Iterable[str]) -> np.ndarray:
+        """Labels (DEFAULT_CLASSES order) of the requested split(s), in `split_frame` order."""
+        return self.split_frame(splits)["class_name"].map(DEFAULT_CLASSES.index).to_numpy(dtype=np.int64)
+
     def load_split(self, splits: str | Iterable[str]) -> tuple[np.ndarray, np.ndarray]:
-        """Grayscale images resized to `image_size`, and labels in DEFAULT_CLASSES order (for ML)."""
-        frame = self.split_frame(splits)
+        """Grayscale images (resized if `image_size` is set) and their labels (for ML)."""
         images = []
-        for rel_path in frame["image_path"]:
+        for rel_path in self.split_frame(splits)["image_path"]:
             img = cv2.imread(str(self.processed_dir / rel_path), cv2.IMREAD_GRAYSCALE)
             if img is None:
                 raise ManifestError(f"Unreadable image: {rel_path}")
-            images.append(cv2.resize(img, self.image_size))
-        labels = frame["class_name"].map(DEFAULT_CLASSES.index).to_numpy(dtype=np.int64)
-        return np.stack(images), labels
+            images.append(cv2.resize(img, self.image_size) if self.image_size else img)
+        return np.stack(images), self.labels(splits)
 
     def torch_dataset(self, splits: str | Iterable[str], transform=None) -> "Subset":
         """ImageFolder over data/processed restricted to the requested split(s) (for DL)."""
