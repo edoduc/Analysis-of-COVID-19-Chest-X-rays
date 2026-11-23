@@ -6,6 +6,7 @@ Extracts statistical ROI features, Local Binary Patterns (LBP), and Histogram of
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -14,14 +15,29 @@ import numpy as np
 from scipy.stats import kurtosis, skew
 from skimage.feature import hog, local_binary_pattern
 from skimage.measure import shannon_entropy
-from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
-from src.config import DATA_DIR, FEATURES_DIR, PROCESSED_DATA_DIR, PROJECT_ROOT, TEST_DATA_DIR, TRAIN_DATA_DIR, load_config
-from src.data_loader import DatasetLoader
+from src.config import DEFAULT_CLASSES, FEATURES_DIR, load_config
+from src.data_loader import DatasetLoader, ManifestError
 from src.logger import get_logger
 
 logger = get_logger(__name__)
+
+FEATURES_META_FILE = "meta.json"
+# Classical ML has no early stopping, so it trains on train+val and is scored on test.
+ML_TRAIN_SPLITS = ("train", "validation")
+ML_TEST_SPLIT = "test"
+
+
+def assert_features_match(features_dir: Path, fingerprint: dict[str, str]) -> None:
+    """Refuse feature matrices extracted from another version of splits.csv."""
+    meta_path = Path(features_dir) / FEATURES_META_FILE
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    if meta.get("fingerprint") != fingerprint:
+        raise ManifestError(
+            f"Features in {features_dir} were not extracted from the current splits.csv. "
+            "Re-run `uv run python -m src.feature_extraction_ml`."
+        )
 
 
 def extract_stat_features(image: np.ndarray) -> np.ndarray:
@@ -167,15 +183,13 @@ def save_features(
 
 
 def run_feature_extraction(
-    train_dir: Path | str | None = None,
-    test_dir: Path | str | None = None,
-    processed_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
     config_path: Path | str | None = None,
+    loader: DatasetLoader | None = None,
 ) -> None:
     """
-    Main execution workflow for feature extraction.
-    Prioritizes pre-split frozen directories (train/test), falling back to processed dataset.
+    Extracts features for the manifest splits: train+val -> 'train' matrices,
+    test -> 'test' matrices. Writes meta.json with the data fingerprint.
     """
     config = load_config(config_path)
     fe_config = config.get("feature_extraction", {})
@@ -184,64 +198,41 @@ def run_feature_extraction(
 
     out_path = Path(output_dir) if output_dir else FEATURES_DIR
     out_path.mkdir(parents=True, exist_ok=True)
+    # Invalidate first, so a crash mid-extraction can't leave old meta next to new matrices.
+    (out_path / FEATURES_META_FILE).unlink(missing_ok=True)
 
-    train_path = Path(train_dir) if train_dir else TRAIN_DATA_DIR
-    test_path = Path(test_dir) if test_dir else TEST_DATA_DIR
-    proc_path = Path(processed_dir) if processed_dir else PROCESSED_DATA_DIR
+    loader = loader or DatasetLoader()
+    fingerprint = loader.fingerprint()
+    logger.info("Data fingerprint: %s", fingerprint)
 
-    label_encoder = LabelEncoder()
+    x_train, y_train = loader.load_split(ML_TRAIN_SPLITS)
+    x_test, y_test = loader.load_split(ML_TEST_SPLIT)
 
-    # Case A: Frozen train and test sets exist on disk (preferred for reproducibility)
-    if train_path.exists() and test_path.exists():
-        logger.info("Detected frozen dataset splits at: %s and %s", train_path, test_path)
-        train_loader = DatasetLoader(data_dir=train_path)
-        test_loader = DatasetLoader(data_dir=test_path)
+    np.save(out_path / "classes.npy", np.array(DEFAULT_CLASSES))
 
-        x_train, y_train_raw = train_loader.load_dataset()
-        x_test, y_test_raw = test_loader.load_dataset()
-
-        # Fit label encoder on combined classes
-        all_labels = np.concatenate([y_train_raw, y_test_raw])
-        label_encoder.fit(all_labels)
-
-        y_train = label_encoder.transform(y_train_raw)
-        y_test = label_encoder.transform(y_test_raw)
-    else:
-        # Case B: Dynamic split from processed directory
-        logger.info("Frozen splits not found. Loading from processed directory: %s", proc_path)
-        loader = DatasetLoader(data_dir=proc_path)
-        x_train, x_test, y_train, y_test, label_encoder = loader.get_train_test_split()
-
-    # Save classes mapping
-    np.save(out_path / "classes.npy", label_encoder.classes_)
-    logger.info("Saved class mapping: %s", list(label_encoder.classes_))
-
-    # Extract & Save Train Features
     train_stats, train_lbp, train_hog = extract_features_from_images(
         x_train, "train", lbp_config, hog_config
     )
     save_features(out_path, "train", train_stats, train_lbp, train_hog, y_train)
 
-    # Extract & Save Test Features
     test_stats, test_lbp, test_hog = extract_features_from_images(
         x_test, "test", lbp_config, hog_config
     )
     save_features(out_path, "test", test_stats, test_lbp, test_hog, y_test)
 
+    # Written last: certifies a complete extraction for this split version.
+    meta = {"fingerprint": fingerprint, "train_splits": list(ML_TRAIN_SPLITS), "feature_extraction": fe_config}
+    (out_path / FEATURES_META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
     logger.info("All feature extraction completed successfully!")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extract ML features from images.")
     parser.add_argument("--config", type=str, default=None, help="Path to config.json")
-    parser.add_argument("--train-dir", type=str, default=None, help="Path to data/train")
-    parser.add_argument("--test-dir", type=str, default=None, help="Path to data/test")
     parser.add_argument("--output-dir", type=str, default=None, help="Path to output features")
     args = parser.parse_args()
 
     run_feature_extraction(
-        train_dir=args.train_dir,
-        test_dir=args.test_dir,
         output_dir=args.output_dir,
         config_path=args.config,
     )

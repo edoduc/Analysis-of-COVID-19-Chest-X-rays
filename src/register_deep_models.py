@@ -1,10 +1,11 @@
 """
 Post-hoc registration of externally trained Deep Learning models (Google Colab)
-into MLflow, evaluated on the same frozen test set as the classical ML models.
+into MLflow, evaluated on the SAME frozen test split as the classical ML models:
+the test rows of the DVC-tracked manifest data/splits.csv, read via DatasetLoader.
 
 For each model, ONE run contains:
-  - params + tags (git commit, DVC hash of the test data, preprocessing, ...)
-  - the evaluation dataset (mlflow.log_input) -> "Datasets used" in the UI
+  - params + tags (git commit, split manifest / processed data DVC md5, preprocessing, ...)
+  - the evaluation dataset (mlflow.log_input) -> same "covid_xray_test" digest as ML runs
   - test_* metrics (sklearn), classification report and confusion matrix
   - the PyTorch model, registered in the Model Registry
 
@@ -25,18 +26,15 @@ from typing import Any
 
 from dotenv import load_dotenv
 import mlflow
-import mlflow.data
 import mlflow.pytorch
 from mlflow.models import infer_signature
 import numpy as np
-import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, precision_recall_fscore_support
+from sklearn.metrics import classification_report
 import torch
-from torchvision.datasets import ImageFolder
-import yaml
 
-from src.config import DEFAULT_CLASSES, PROJECT_ROOT, REPORTS_DIR, TEST_DATA_DIR
-from src.evaluate import evaluate_deep_model, plot_confusion_matrix
+from src.config import DEFAULT_CLASSES, PROJECT_ROOT, REPORTS_DIR
+from src.data_loader import DatasetLoader
+from src.evaluate import compute_metrics, evaluate_deep_model, log_test_dataset, plot_confusion_matrix
 from src.logger import get_logger
 from src.models.architectures import build_model
 
@@ -45,12 +43,16 @@ logger = get_logger(__name__)
 
 IMG_SIZE = 224
 EXPERIMENT_NAME = "Deep_Model_Registry"
-DATASET_NAME = "covid_xray_test"  # use the SAME name for ML and DL models
 CACHE_DIR = REPORTS_DIR / "cache"
+# Part of the idempotency key: bump it to force re-registration in a new format.
+SERIALIZATION_FORMAT = "pickle"
 
 # None = use the GPU if available, otherwise CPU. Set to "cpu" to force CPU.
 INFERENCE_DEVICE: str | None = None
 
+# Only models trained on the train/validation splits of data/splits.csv belong here.
+# The custom CNN is not listed: it was trained on an older split, so its test
+# metrics would be leaked. Add it back once retrained on splits.csv.
 DEEP_MODELS: list[dict[str, Any]] = [
     {
         "name": "resnet50_xray",
@@ -59,14 +61,6 @@ DEEP_MODELS: list[dict[str, Any]] = [
         "state_dict_key": None,
         "preprocessing": "grayscale3+imagenet_norm",
         "description": "ResNet50 fine-tuned for COVID-19 Chest X-Ray classification (4 classes).",
-    },
-    {
-        "name": "custom_cnn_xray",
-        "arch": "custom_cnn",
-        "checkpoint": PROJECT_ROOT / "models" / "custom_cnn" / "best_checkpoint.pt",
-        "state_dict_key": "model_state_dict",
-        "preprocessing": "grayscale3+[0,1]",
-        "description": "Custom 5-block CNN trained for COVID-19 Chest X-Ray classification (4 classes).",
     },
 ]
 
@@ -92,53 +86,6 @@ def get_git_commit() -> str:
         ).strip()
     except Exception:
         return "unknown"
-
-
-def get_dvc_hash(data_path: Path) -> str:
-    """
-    Read the DVC md5 of the test data from '<data_path>.dvc' (or from dvc.lock).
-    Returns "unknown" if the data is not tracked that way.
-    """
-    dvc_file = data_path.with_name(data_path.name + ".dvc")
-    try:
-        if dvc_file.exists():
-            return yaml.safe_load(dvc_file.read_text())["outs"][0]["md5"]
-        lock = PROJECT_ROOT / "dvc.lock"
-        if lock.exists():
-            rel = data_path.relative_to(PROJECT_ROOT).as_posix()
-            for stage in yaml.safe_load(lock.read_text()).get("stages", {}).values():
-                for out in stage.get("outs", []):
-                    if out.get("path") == rel:
-                        return out["md5"]
-    except Exception:
-        logger.exception("Could not read DVC hash")
-    return "unknown"
-
-
-def check_test_set() -> int:
-    """Fail loudly instead of silently evaluating on a different dataset."""
-    if not TEST_DATA_DIR.exists() or not any(TEST_DATA_DIR.iterdir()):
-        raise FileNotFoundError(
-            f"Frozen test set not found at {TEST_DATA_DIR}. Run `dvc pull` first."
-        )
-    ds = ImageFolder(root=str(TEST_DATA_DIR))
-    if ds.classes != list(DEFAULT_CLASSES):
-        raise ValueError(
-            f"Class order mismatch: ImageFolder={ds.classes} vs DEFAULT_CLASSES={list(DEFAULT_CLASSES)}"
-        )
-    return len(ds)
-
-
-def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
-    p, r, f1, _ = precision_recall_fscore_support(y_true, y_pred, average="macro", zero_division=0)
-    _, _, f1_w, _ = precision_recall_fscore_support(y_true, y_pred, average="weighted", zero_division=0)
-    return {
-        "test_accuracy": float(accuracy_score(y_true, y_pred)),
-        "test_precision_macro": float(p),
-        "test_recall_macro": float(r),
-        "test_f1_macro": float(f1),
-        "test_f1_weighted": float(f1_w),
-    }
 
 
 def load_model_instance(
@@ -170,20 +117,28 @@ def load_model_instance(
     return model, colab_metrics
 
 
-def already_registered(client: mlflow.MlflowClient, model_name: str, ckpt_sha: str) -> bool:
-    """Idempotency: skip if a version with the same checkpoint hash exists."""
-    try:
-        versions = client.search_model_versions(f"name='{model_name}'")
-    except Exception:
-        return False
-    return any(v.tags.get("checkpoint_sha256") == ckpt_sha for v in versions)
+def already_registered(
+    client: mlflow.MlflowClient, model_name: str, ckpt_sha: str, split_md5: str
+) -> bool:
+    """
+    Idempotency: skip if a version exists for the same checkpoint, evaluated on
+    the same split manifest, saved in the same serialization format.
+    These are MODEL VERSION tags (not run tags), set atomically at registration.
+    """
+    versions = client.search_model_versions(f"name='{model_name}'")
+    return any(
+        v.tags.get("checkpoint_sha256") == ckpt_sha
+        and v.tags.get("split_manifest_md5") == split_md5
+        and v.tags.get("serialization_format") == SERIALIZATION_FORMAT
+        for v in versions
+    )
 
 
 def get_predictions(
-    model_cfg: dict[str, Any], ckpt_sha: str, dvc_hash: str
+    model_cfg: dict[str, Any], ckpt_sha: str, split_md5: str, loader: DatasetLoader
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Run inference on the frozen test set, or reload cached predictions."""
-    cache = CACHE_DIR / f"preds_{model_cfg['name']}_{ckpt_sha[:12]}_{dvc_hash[:8]}.npz"
+    """Run inference on the frozen test split, or reload cached predictions."""
+    cache = CACHE_DIR / f"preds_{model_cfg['name']}_{ckpt_sha[:12]}_{split_md5[:12]}.npz"
     if cache.exists():
         d = np.load(cache)
         logger.info("Loaded cached predictions from %s", cache.name)
@@ -191,9 +146,9 @@ def get_predictions(
 
     y_true, y_pred, _ = evaluate_deep_model(
         model_cfg["checkpoint"],
-        data_dir=TEST_DATA_DIR,
         arch=model_cfg["arch"],
         device_name=INFERENCE_DEVICE,
+        loader=loader,
     )
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(cache, y_true=y_true, y_pred=y_pred)
@@ -208,20 +163,22 @@ def register_model_to_mlflow(
     model_cfg: dict[str, Any],
     client: mlflow.MlflowClient,
     git_commit: str,
-    dvc_hash: str,
+    loader: DatasetLoader,
+    fingerprint: dict[str, str],
 ) -> None:
     model_name = model_cfg["name"]
     ckpt: Path = model_cfg["checkpoint"]
     ckpt_sha = sha256_of(ckpt)
+    split_md5 = fingerprint["split_manifest_md5"]
 
-    if already_registered(client, model_name, ckpt_sha):
+    if already_registered(client, model_name, ckpt_sha, split_md5):
         logger.info("%s: this checkpoint is already registered, skipping.", model_name)
         return
 
     logger.info("Registering model: %s", model_name)
 
-    # 1. Predictions on the frozen test set (cached)
-    y_true, y_pred = get_predictions(model_cfg, ckpt_sha, dvc_hash)
+    # 1. Predictions on the frozen test split (cached)
+    y_true, y_pred = get_predictions(model_cfg, ckpt_sha, split_md5, loader)
 
     # 2. Model + signature
     model, colab_metrics = load_model_instance(
@@ -232,11 +189,13 @@ def register_model_to_mlflow(
         output_example = model(torch.from_numpy(input_example)).numpy()
     signature = infer_signature(input_example, output_example)
 
-    # 3. MLflow dataset (metadata + hash only; images stay in DVC)
-    eval_df = pd.DataFrame({"label": y_true, "prediction": y_pred})
-    dataset = mlflow.data.from_pandas(
-        eval_df, name=DATASET_NAME, targets="label", predictions="prediction"
-    )
+    # Tags shared by the run and the model version. The version tags are the
+    # idempotency key read by already_registered().
+    lineage_tags = {
+        "checkpoint_sha256": ckpt_sha,
+        "serialization_format": SERIALIZATION_FORMAT,
+        **fingerprint,
+    }
 
     with mlflow.start_run(run_name=f"register_{model_name}") as run:
         logger.info("Started run %s", run.info.run_id)
@@ -247,9 +206,8 @@ def register_model_to_mlflow(
                 "registered_post_hoc": "true",
                 "metrics_source": "recomputed_on_frozen_test_set",
                 "git_commit": git_commit,
-                "dvc_test_data_md5": dvc_hash,
                 "preprocessing": model_cfg["preprocessing"],
-                "checkpoint_sha256": ckpt_sha,
+                **lineage_tags,
             }
         )
         mlflow.log_params(
@@ -265,7 +223,7 @@ def register_model_to_mlflow(
             mlflow.log_metrics(colab_metrics)  # training-time numbers, kept separate
 
         logger.info("Logging evaluation dataset...")
-        mlflow.log_input(dataset, context="evaluation")
+        log_test_dataset(loader, fingerprint)
 
         logger.info("Logging test metrics...")
         metrics = compute_metrics(y_true, y_pred)
@@ -283,22 +241,26 @@ def register_model_to_mlflow(
         plot_confusion_matrix(y_true, y_pred, list(DEFAULT_CLASSES), cm_path)
         mlflow.log_artifact(str(cm_path), artifact_path="evaluation")
 
-        logger.info("Uploading and registering model (this can take a minute)...")
+        logger.info("Uploading model (this can take a minute)...")
         model_info = mlflow.pytorch.log_model(
             pytorch_model=model,
             name="model",  # artifact_path="model" on MLflow 2.x
-            registered_model_name=model_name,
             signature=signature,
             input_example=input_example,
+            serialization_format=SERIALIZATION_FORMAT,
         )
 
-    version = model_info.registered_model_version
+    # Register separately so the version is created WITH its tags in one call:
+    # a crash can no longer leave an untagged version that defeats idempotency.
+    logger.info("Registering model version...")
+    model_version = mlflow.register_model(
+        model_info.model_uri, model_name, tags=lineage_tags
+    )
+    version = model_version.version
     client.update_registered_model(model_name, description=model_cfg["description"])
     client.update_model_version(
         model_name, version, description=f"Imported from {ckpt.name}"
     )
-    client.set_model_version_tag(model_name, version, "checkpoint_sha256", ckpt_sha)
-    client.set_model_version_tag(model_name, version, "dvc_test_data_md5", dvc_hash)
     client.set_registered_model_alias(model_name, "candidate", version)
     logger.info("Registered %s version %s (alias 'candidate')", model_name, version)
 
@@ -311,11 +273,12 @@ def main() -> None:
     mlflow.set_tracking_uri(tracking_uri)
     logger.info("Connected to MLflow Tracking URI: %s", tracking_uri)
 
-    n_test = check_test_set()
+    loader = DatasetLoader()
+    fingerprint = loader.fingerprint()  # raises if splits.csv != its committed .dvc
     git_commit = get_git_commit()
-    dvc_hash = get_dvc_hash(TEST_DATA_DIR)
     logger.info(
-        "Test set: %d images | git=%s | dvc test data md5=%s", n_test, git_commit[:8], dvc_hash
+        "Test split: %d images | git=%s | %s",
+        len(loader.split_frame("test")), git_commit[:8], fingerprint,
     )
 
     client = mlflow.MlflowClient()
@@ -325,7 +288,7 @@ def main() -> None:
 
     for model_cfg in DEEP_MODELS:
         try:
-            register_model_to_mlflow(model_cfg, client, git_commit, dvc_hash)
+            register_model_to_mlflow(model_cfg, client, git_commit, loader, fingerprint)
         except Exception:
             logger.exception("Failed to register %s", model_cfg["name"])
 
