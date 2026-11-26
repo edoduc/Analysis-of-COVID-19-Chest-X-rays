@@ -87,7 +87,7 @@ sur un split aléatoire).
 
 * **Modèle Deep Learning Custom CNN (from scratch) :**
   ```bash
-  uv run python src/evaluate.py --type deep --arch custom_cnn --filename cnn_from_scratch.pt
+  uv run python src/evaluate.py --type deep --arch custom_cnn --filename custom_cnn/best_checkpoint.pt
   ```
 
 
@@ -99,9 +99,11 @@ Entraînez sur `train`, faites l'early stopping sur `validation`, n'utilisez jam
 Dans Colab, après avoir copié `data/processed` et `data/splits.csv` :
 
 ```python
+import hashlib
 import pandas as pd
+import torch
 from pathlib import Path
-from torch.utils.data import Subset
+from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import ImageFolder
 
 PROCESSED = Path("data/processed")
@@ -115,8 +117,19 @@ def split_dataset(split, transform):
 
 train_ds = split_dataset("train", train_transforms)
 val_ds = split_dataset("validation", eval_transforms)
+
+# Reproductibilité : même ordre de mélange à chaque run, validation non mélangée.
+torch.manual_seed(42)
+g = torch.Generator().manual_seed(42)
+dataloader_train = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=g)
+dataloader_val = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
+
+# Vérifie que splits.csv est bien la version commitée dans DVC.
+SPLIT_MD5 = hashlib.md5(open("data/splits.csv", "rb").read()).hexdigest()
 ```
 
-Dans le dépôt : `DatasetLoader().torch_dataset("train", transform)`. Le custom CNN a été
-entraîné sur un ancien split : il est retiré de `src/register_deep_models.py` tant qu'il
-n'est pas ré-entraîné ainsi.
+Enregistrez la traçabilité dans le checkpoint, à côté de `model_state_dict` :
+`split_manifest_md5`, `classes`, `img_size`, `seed`. `src/register_deep_models.py` refuse
+un checkpoint dont `split_manifest_md5` ne correspond pas au `splits.csv` courant.
+
+Dans le dépôt : `DatasetLoader().torch_dataset("train", transform)`.
