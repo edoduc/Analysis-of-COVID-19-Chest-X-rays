@@ -51,9 +51,16 @@ SERIALIZATION_FORMAT = "pickle"
 INFERENCE_DEVICE: str | None = None
 
 # Only models trained on the train/validation splits of data/splits.csv belong here.
-# The custom CNN is not listed: it was trained on an older split, so its test
-# metrics would be leaked. Add it back once retrained on splits.csv.
+# Checkpoints that record a `split_manifest_md5` are checked against splits.csv.
 DEEP_MODELS: list[dict[str, Any]] = [
+    {
+        "name": "custom_cnn_xray",
+        "arch": "custom_cnn",
+        "checkpoint": PROJECT_ROOT / "models" / "custom_cnn" / "best_checkpoint.pt",
+        "state_dict_key": "model_state_dict",
+        "preprocessing": "grayscale3",
+        "description": "Custom CNN trained from scratch for COVID-19 Chest X-Ray classification (4 classes).",
+    },
     {
         "name": "resnet50_xray",
         "arch": "resnet50",
@@ -65,7 +72,7 @@ DEEP_MODELS: list[dict[str, Any]] = [
 ]
 
 # Keys that may exist in a Colab checkpoint dict (logged as colab_*, NOT as test_*)
-COLAB_METRIC_KEYS = ("val_acc", "val_loss", "train_acc", "train_loss", "epoch")
+COLAB_METRIC_KEYS = ("val_acc", "val_loss", "val_f1_macro", "train_acc", "train_loss", "epoch")
 
 
 # --------------------------------------------------------------------------- #
@@ -86,6 +93,25 @@ def get_git_commit() -> str:
         ).strip()
     except Exception:
         return "unknown"
+
+
+def check_checkpoint_lineage(checkpoint_path: Path, split_md5: str) -> None:
+    """
+    Refuse a checkpoint whose recorded training split is not the current splits.csv.
+    Older checkpoints without the key (ResNet) are accepted.
+    """
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if not isinstance(raw, dict):
+        return
+    trained_on = raw.get("split_manifest_md5")
+    if trained_on is not None and trained_on != split_md5:
+        raise ValueError(
+            f"{checkpoint_path.name} was trained on splits.csv md5 {trained_on}, "
+            f"but the current split is {split_md5}: its test metrics would be leaked."
+        )
+    classes = raw.get("classes")
+    if classes is not None and list(classes) != list(DEFAULT_CLASSES):
+        raise ValueError(f"{checkpoint_path.name} class order {classes} != {DEFAULT_CLASSES}")
 
 
 def load_model_instance(
@@ -174,6 +200,7 @@ def register_model_to_mlflow(
     if already_registered(client, model_name, ckpt_sha, split_md5):
         logger.info("%s: this checkpoint is already registered, skipping.", model_name)
         return
+    check_checkpoint_lineage(ckpt, split_md5)
 
     logger.info("Registering model: %s", model_name)
 
